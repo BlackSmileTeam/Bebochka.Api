@@ -103,10 +103,30 @@ public class ProductsController : ControllerBase
             // Читаем форму вручную, чтобы избежать проблем с автоматическим биндингом
             var formReadStart = DateTime.UtcNow;
             Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Reading form...");
-            var form = await Request.ReadFormAsync();
-            var formReadEnd = DateTime.UtcNow;
-            var formReadDuration = (formReadEnd - formReadStart).TotalMilliseconds;
-            Console.WriteLine($"[{formReadEnd:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Form read successfully in {formReadDuration:F2} ms. Form keys: {string.Join(", ", form.Keys)}");
+            
+            // Используем CancellationToken с таймаутом для чтения формы
+            using var formReadCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+            var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(formReadCts.Token, Request.HttpContext.RequestAborted);
+            
+            IFormCollection form;
+            try
+            {
+                form = await Request.ReadFormAsync(linkedCts.Token);
+                var formReadEnd = DateTime.UtcNow;
+                var formReadDuration = (formReadEnd - formReadStart).TotalMilliseconds;
+                Console.WriteLine($"[{formReadEnd:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Form read successfully in {formReadDuration:F2} ms. Form keys: {string.Join(", ", form.Keys)}");
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR: Form reading was cancelled or timed out");
+                return StatusCode(408, new { message = "Request timeout while reading form data" });
+            }
+            catch (Exception formEx)
+            {
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR reading form: {formEx.Message}");
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Exception type: {formEx.GetType().Name}");
+                return StatusCode(400, new { message = "Failed to read form data", details = formEx.Message });
+            }
             
             // Создаем DTO из формы
             var dto = new CreateProductDto
