@@ -119,11 +119,24 @@ jobs:
       run: |
         docker save ${{ env.IMAGE_NAME }}:latest | gzip > ${{ env.IMAGE_NAME }}.tar.gz
 
+    - name: Upload Docker image artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-image
+        path: ${{ env.IMAGE_NAME }}.tar.gz
+        retention-days: 1
+
   deploy:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
+
+    - name: Download Docker image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: docker-image
+        path: .
 
     - name: Prepare deployment directory
       uses: appleboy/ssh-action@v1
