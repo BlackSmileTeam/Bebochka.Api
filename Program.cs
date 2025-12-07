@@ -7,6 +7,7 @@ using Bebochka.Api.Services;
 using Bebochka.Api.Models;
 using Pomelo.EntityFrameworkCore.MySql.Infrastructure;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.Http.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,8 +33,24 @@ builder.WebHost.ConfigureKestrel(options =>
     options.AllowSynchronousIO = false;
 });
 
+// Configure form options for large file uploads
+builder.Services.Configure<FormOptions>(options =>
+{
+    options.MultipartBodyLengthLimit = 52428800; // 50MB
+    options.ValueLengthLimit = int.MaxValue;
+    options.MultipartHeadersLengthLimit = int.MaxValue;
+    options.MultipartBoundaryLengthLimit = int.MaxValue;
+    options.BufferBody = false; // Не буферизуем тело запроса для больших файлов
+    options.BufferBodyLengthLimit = long.MaxValue;
+    options.KeyLengthLimit = int.MaxValue;
+});
+
 // Add services to the container
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    // Увеличиваем лимиты для multipart/form-data
+    options.MaxModelBindingCollectionSize = int.MaxValue;
+});
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
