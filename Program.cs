@@ -6,6 +6,7 @@ using Bebochka.Api.Data;
 using Bebochka.Api.Services;
 using Bebochka.Api.Models;
 using Pomelo.EntityFrameworkCore.MySql.Infrastructure;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,6 +17,18 @@ builder.WebHost.ConfigureKestrel(options =>
     options.Limits.RequestHeadersTimeout = TimeSpan.FromMinutes(1);
     options.Limits.MaxRequestBodySize = 50 * 1024 * 1024; // 50MB
     options.Limits.MaxResponseBufferSize = 50 * 1024 * 1024; // 50MB
+    
+    // Увеличиваем минимальную скорость чтения тела запроса для больших файлов
+    // Устанавливаем очень низкий порог, чтобы не прерывать медленные загрузки
+    options.Limits.MinRequestBodyDataRate = new MinDataRate(
+        bytesPerSecond: 100, // Минимум 100 байт/сек (очень низкий порог)
+        gracePeriod: TimeSpan.FromMinutes(5) // Даем 5 минут на загрузку
+    );
+    options.Limits.MinResponseDataRate = new MinDataRate(
+        bytesPerSecond: 100,
+        gracePeriod: TimeSpan.FromMinutes(5)
+    );
+    
     options.AllowSynchronousIO = false;
 });
 
