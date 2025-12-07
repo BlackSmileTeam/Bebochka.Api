@@ -8,6 +8,7 @@
     <UserSecretsId>fcbc15d7-83e0-444c-9e1c-19c921b9a7a7</UserSecretsId>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>

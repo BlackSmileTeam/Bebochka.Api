@@ -75,6 +75,9 @@ public class ProductsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<ProductDto>> CreateProduct([FromForm] CreateProductDto dto, [FromForm] List<IFormFile> images)
     {
+        Console.WriteLine($"[ProductsController] CreateProduct called - Name: {dto.Name}, Images count: {images?.Count ?? 0}");
+        Console.WriteLine($"[ProductsController] Request headers: {string.Join(", ", Request.Headers.Select(h => $"{h.Key}: {h.Value}"))}");
+        
         var imagePaths = new List<string>();
 
         if (images != null && images.Any())
