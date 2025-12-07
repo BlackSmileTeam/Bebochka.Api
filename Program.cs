@@ -191,8 +191,15 @@ app.Use(async (context, next) =>
     if (context.Request.Method == "POST" && context.Request.Path.StartsWithSegments("/api/products"))
     {
         Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] POST /api/products - ContentType: {context.Request.ContentType}, ContentLength: {context.Request.ContentLength}");
+        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] HasFormContentType: {context.Request.HasFormContentType}");
+        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Body.CanSeek: {context.Request.Body.CanSeek}");
     }
     await next();
+    
+    if (context.Request.Method == "POST" && context.Request.Path.StartsWithSegments("/api/products"))
+    {
+        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] POST /api/products COMPLETED - Status: {context.Response.StatusCode}");
+    }
 });
 
 // CORS must be very early in the pipeline, before UseRouting
