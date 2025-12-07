@@ -69,3 +69,4 @@ artifacts/
 # Uploads
 wwwroot/uploads/
 
+/Database/create_admin_user.sql
