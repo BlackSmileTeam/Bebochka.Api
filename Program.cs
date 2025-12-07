@@ -41,9 +41,10 @@ builder.Services.Configure<FormOptions>(options =>
     options.ValueLengthLimit = int.MaxValue;
     options.MultipartHeadersLengthLimit = int.MaxValue;
     options.MultipartBoundaryLengthLimit = int.MaxValue;
-    options.BufferBody = false; // Не буферизуем тело запроса для больших файлов
-    options.BufferBodyLengthLimit = long.MaxValue;
+    options.BufferBody = true; // Буферизуем тело запроса для правильного биндинга модели
+    options.BufferBodyLengthLimit = 52428800; // 50MB
     options.KeyLengthLimit = int.MaxValue;
+    options.MemoryBufferThreshold = 1024 * 1024; // 1MB - после этого пишем на диск
 });
 
 // Add services to the container
@@ -51,6 +52,10 @@ builder.Services.AddControllers(options =>
 {
     // Увеличиваем лимиты для multipart/form-data
     options.MaxModelBindingCollectionSize = int.MaxValue;
+})
+.AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.PropertyNamingPolicy = null; // Сохраняем оригинальные имена свойств
 });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -359,12 +364,60 @@ app.Use(async (context, next) =>
     }
 });
 
-// CORS must be very early in the pipeline, before UseRouting
-app.UseCors("AllowReactApp");
+        // CORS must be very early in the pipeline, before UseRouting
+        app.UseCors("AllowReactApp");
 
-// Authentication and Authorization must be before UseRouting
-app.UseAuthentication();
-app.UseAuthorization();
+        // Authentication and Authorization must be before UseRouting
+        app.UseAuthentication();
+        app.UseAuthorization();
+
+        // Add middleware to log routing and model binding
+        app.Use(async (context, next) =>
+        {
+            var requestId = context.Items["RequestId"]?.ToString() ?? Guid.NewGuid().ToString("N")[..8];
+            var isMultipart = context.Request.ContentType?.Contains("multipart") == true;
+            
+            try
+            {
+                if (isMultipart && context.Request.Path.StartsWithSegments("/api/products") && context.Request.Method == "POST")
+                {
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Before routing - Path: {context.Request.Path}");
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Can read form: {context.Request.HasFormContentType}");
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Form is readable: {context.Request.Form != null}");
+                    
+                    // Проверяем, можем ли мы прочитать форму (но не читаем её полностью)
+                    try
+                    {
+                        var formCheckStart = DateTime.UtcNow;
+                        var canReadForm = context.Request.HasFormContentType;
+                        var formCheckDuration = (DateTime.UtcNow - formCheckStart).TotalMilliseconds;
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Form check took {formCheckDuration:F2} ms, CanRead: {canReadForm}");
+                    }
+                    catch (Exception formEx)
+                    {
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] ERROR checking form: {formEx.Message}");
+                    }
+                }
+                
+                await next();
+                
+                if (isMultipart && context.Request.Path.StartsWithSegments("/api/products") && context.Request.Method == "POST")
+                {
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] After routing - Status: {context.Response.StatusCode}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING_ERROR] Exception: {ex.Message}");
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING_ERROR] Type: {ex.GetType().Name}");
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING_ERROR] StackTrace: {ex.StackTrace}");
+                if (ex.InnerException != null)
+                {
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING_ERROR] Inner: {ex.InnerException.Message}");
+                }
+                throw;
+            }
+        });
 
 app.UseSwagger();
 app.UseSwaggerUI(c =>
