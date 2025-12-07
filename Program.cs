@@ -14,6 +14,8 @@ builder.WebHost.ConfigureKestrel(options =>
 {
     options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
     options.Limits.RequestHeadersTimeout = TimeSpan.FromMinutes(1);
+    options.Limits.MaxRequestBodySize = 50 * 1024 * 1024; // 50MB
+    options.Limits.MaxResponseBufferSize = 50 * 1024 * 1024; // 50MB
     options.AllowSynchronousIO = false;
 });
 
