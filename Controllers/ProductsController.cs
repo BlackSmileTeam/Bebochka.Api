@@ -103,6 +103,15 @@ public class ProductsController : ControllerBase
             // Читаем форму вручную, чтобы избежать проблем с автоматическим биндингом
             var formReadStart = DateTime.UtcNow;
             Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Reading form...");
+            Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request body can seek: {Request.Body.CanSeek}");
+            Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request body can read: {Request.Body.CanRead}");
+            
+            // Включаем буферизацию вручную, если она еще не включена
+            if (!Request.Body.CanSeek)
+            {
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Enabling request buffering...");
+                Request.EnableBuffering();
+            }
             
             // Используем CancellationToken с таймаутом для чтения формы
             using var formReadCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
@@ -125,6 +134,11 @@ public class ProductsController : ControllerBase
             {
                 Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR reading form: {formEx.Message}");
                 Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Exception type: {formEx.GetType().Name}");
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] StackTrace: {formEx.StackTrace}");
+                if (formEx.InnerException != null)
+                {
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Inner exception: {formEx.InnerException.Message}");
+                }
                 return StatusCode(400, new { message = "Failed to read form data", details = formEx.Message });
             }
             
