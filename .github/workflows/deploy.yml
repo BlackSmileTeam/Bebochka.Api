@@ -9,7 +9,7 @@ env:
   DOCKERFILE_PATH: Dockerfile
   SSH_PORT: 22
   CONTAINER_PORT: 44315
-  HOST_PORT: 44315
+  HOST_PORT: 55501
   DEPLOY_DIR: /opt/bebochka
   IMAGE_NAME: bebochka-backend
 
