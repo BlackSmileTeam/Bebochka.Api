@@ -41,10 +41,11 @@ builder.Services.Configure<FormOptions>(options =>
     options.ValueLengthLimit = int.MaxValue;
     options.MultipartHeadersLengthLimit = int.MaxValue;
     options.MultipartBoundaryLengthLimit = int.MaxValue;
-    options.BufferBody = true; // Буферизуем тело запроса для правильного биндинга модели
+    options.BufferBody = false; // НЕ буферизуем тело запроса - читаем напрямую для лучшей производительности
     options.BufferBodyLengthLimit = 52428800; // 50MB
     options.KeyLengthLimit = int.MaxValue;
     options.MemoryBufferThreshold = 10 * 1024 * 1024; // 10MB - увеличиваем порог для буферизации в памяти
+    options.ValueCountLimit = int.MaxValue; // Убираем лимит на количество значений в форме
 });
 
 // Add services to the container
@@ -375,35 +376,43 @@ app.Use(async (context, next) =>
         app.Use(async (context, next) =>
         {
             var requestId = context.Items["RequestId"]?.ToString() ?? Guid.NewGuid().ToString("N")[..8];
+            context.Items["RequestId"] = requestId;
             var isMultipart = context.Request.ContentType?.Contains("multipart") == true;
             
             try
             {
                 if (isMultipart && context.Request.Path.StartsWithSegments("/api/products") && context.Request.Method == "POST")
                 {
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Before routing - Path: {context.Request.Path}");
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Can read form: {context.Request.HasFormContentType}");
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Form is readable: {context.Request.Form != null}");
+                    var routingStart = DateTime.UtcNow;
+                    Console.WriteLine($"[{routingStart:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Before routing - Path: {context.Request.Path}");
+                    Console.WriteLine($"[{routingStart:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Can read form: {context.Request.HasFormContentType}");
+                    Console.WriteLine($"[{routingStart:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] ContentLength: {context.Request.ContentLength}");
                     
-                    // Проверяем, можем ли мы прочитать форму (но не читаем её полностью)
+                    // Используем таймаут для следующего middleware
+                    using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10)); // 10 минут таймаут
+                    var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token, context.RequestAborted);
+                    
                     try
                     {
-                        var formCheckStart = DateTime.UtcNow;
-                        var canReadForm = context.Request.HasFormContentType;
-                        var formCheckDuration = (DateTime.UtcNow - formCheckStart).TotalMilliseconds;
-                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Form check took {formCheckDuration:F2} ms, CanRead: {canReadForm}");
+                        await next();
                     }
-                    catch (Exception formEx)
+                    catch (OperationCanceledException) when (linkedCts.Token.IsCancellationRequested)
                     {
-                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] ERROR checking form: {formEx.Message}");
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] Request cancelled or timed out");
+                        if (!context.Response.HasStarted)
+                        {
+                            context.Response.StatusCode = 408; // Request Timeout
+                        }
+                        return;
                     }
+                    
+                    var routingEnd = DateTime.UtcNow;
+                    var routingDuration = (routingEnd - routingStart).TotalMilliseconds;
+                    Console.WriteLine($"[{routingEnd:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] After routing - Status: {context.Response.StatusCode}, Duration: {routingDuration:F2} ms");
                 }
-                
-                await next();
-                
-                if (isMultipart && context.Request.Path.StartsWithSegments("/api/products") && context.Request.Method == "POST")
+                else
                 {
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ROUTING] After routing - Status: {context.Response.StatusCode}");
+                    await next();
                 }
             }
             catch (Exception ex)

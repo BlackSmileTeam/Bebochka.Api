@@ -90,29 +90,45 @@ public class ProductsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [RequestFormLimits(MultipartBodyLengthLimit = 52428800)] // 50MB
     [DisableRequestSizeLimit]
-    public async Task<ActionResult<ProductDto>> CreateProduct([FromForm] CreateProductDto dto, [FromForm] List<IFormFile>? images = null)
+    public async Task<ActionResult<ProductDto>> CreateProduct()
     {
         var startTime = DateTime.UtcNow;
         try
         {
             Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] CreateProduct STARTED");
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO Name: {dto?.Name ?? "NULL"}");
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO Brand: {dto?.Brand ?? "NULL"}");
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO Price: {dto?.Price}");
             Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request ContentType: {Request.ContentType}");
             Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request HasFormContentType: {Request.HasFormContentType}");
             Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request ContentLength: {Request.ContentLength}");
             
-            // Получаем файлы из параметра или из Request.Form напрямую
-            var files = images ?? Request.Form.Files.ToList();
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Files from parameter: {images?.Count ?? 0}");
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Files from Request.Form: {Request.Form.Files.Count}");
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Total files to process: {files.Count}");
+            // Читаем форму вручную, чтобы избежать проблем с автоматическим биндингом
+            var formReadStart = DateTime.UtcNow;
+            Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Reading form...");
+            var form = await Request.ReadFormAsync();
+            var formReadEnd = DateTime.UtcNow;
+            var formReadDuration = (formReadEnd - formReadStart).TotalMilliseconds;
+            Console.WriteLine($"[{formReadEnd:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Form read successfully in {formReadDuration:F2} ms. Form keys: {string.Join(", ", form.Keys)}");
             
-            if (dto == null)
+            // Создаем DTO из формы
+            var dto = new CreateProductDto
             {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR: DTO is null");
-                return BadRequest(new { message = "Product data is required" });
+                Name = form["name"].ToString(),
+                Brand = form["brand"].ToString(),
+                Description = form["description"].ToString(),
+                Price = decimal.TryParse(form["price"].ToString(), out var price) ? price : 0,
+                Size = form["size"].ToString(),
+                Color = form["color"].ToString()
+            };
+            
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO created - Name: {dto.Name}, Brand: {dto.Brand}, Price: {dto.Price}");
+            
+            // Получаем файлы из формы
+            var files = form.Files.ToList();
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Files from form: {files.Count}");
+            
+            if (string.IsNullOrEmpty(dto.Name))
+            {
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR: Product name is required");
+                return BadRequest(new { message = "Product name is required" });
             }
         
             var imagePaths = new List<string>();
