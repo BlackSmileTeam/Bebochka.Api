@@ -62,6 +62,9 @@ public class ProductService : IProductService
             Size = dto.Size,
             Color = dto.Color,
             Images = imagePaths,
+            QuantityInStock = dto.QuantityInStock > 0 ? dto.QuantityInStock : 1,
+            Gender = dto.Gender,
+            Condition = dto.Condition,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -91,6 +94,9 @@ public class ProductService : IProductService
         product.Size = dto.Size;
         product.Color = dto.Color;
         product.Images = imagePaths;
+        product.QuantityInStock = dto.QuantityInStock > 0 ? dto.QuantityInStock : product.QuantityInStock;
+        product.Gender = dto.Gender;
+        product.Condition = dto.Condition;
         product.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -131,6 +137,9 @@ public class ProductService : IProductService
             Size = product.Size,
             Color = product.Color,
             Images = product.Images,
+            QuantityInStock = product.QuantityInStock,
+            Gender = product.Gender,
+            Condition = product.Condition,
             CreatedAt = product.CreatedAt,
             UpdatedAt = product.UpdatedAt
         };

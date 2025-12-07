@@ -54,6 +54,21 @@ public class ProductDto
     /// Gets or sets the date and time when the product was last updated
     /// </summary>
     public DateTime UpdatedAt { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the quantity of products in stock
+    /// </summary>
+    public int QuantityInStock { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the gender target (мальчик, девочка, унисекс)
+    /// </summary>
+    public string? Gender { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the product condition (новая, отличное, недостаток)
+    /// </summary>
+    public string? Condition { get; set; }
 }
 
 /// <summary>
@@ -95,6 +110,21 @@ public class CreateProductDto
     /// Gets or sets the list of base64 encoded images
     /// </summary>
     public List<string>? Images { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the quantity of products in stock
+    /// </summary>
+    public int QuantityInStock { get; set; } = 1;
+    
+    /// <summary>
+    /// Gets or sets the gender target (мальчик, девочка, унисекс)
+    /// </summary>
+    public string? Gender { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the product condition (новая, отличное, недостаток)
+    /// </summary>
+    public string? Condition { get; set; }
 }
 
 /// <summary>
@@ -131,4 +161,19 @@ public class UpdateProductDto
     /// Gets or sets the product color
     /// </summary>
     public string? Color { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the quantity of products in stock
+    /// </summary>
+    public int QuantityInStock { get; set; } = 1;
+    
+    /// <summary>
+    /// Gets or sets the gender target (мальчик, девочка, унисекс)
+    /// </summary>
+    public string? Gender { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the product condition (новая, отличное, недостаток)
+    /// </summary>
+    public string? Condition { get; set; }
 }

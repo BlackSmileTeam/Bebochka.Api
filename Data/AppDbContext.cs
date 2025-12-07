@@ -25,6 +25,21 @@ public class AppDbContext : DbContext
     /// Gets or sets the Users database set
     /// </summary>
     public DbSet<User> Users { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the CartItems database set
+    /// </summary>
+    public DbSet<CartItem> CartItems { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the Orders database set
+    /// </summary>
+    public DbSet<Order> Orders { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the OrderItems database set
+    /// </summary>
+    public DbSet<OrderItem> OrderItems { get; set; }
 
     /// <summary>
     /// Configures the entity models and their relationships
@@ -55,6 +70,46 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Email).HasMaxLength(100);
             entity.Property(e => e.FullName).HasMaxLength(100);
             entity.HasIndex(e => e.Username).IsUnique();
+        });
+
+        modelBuilder.Entity<CartItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.SessionId).IsRequired().HasMaxLength(255);
+            entity.HasIndex(e => new { e.SessionId, e.ProductId });
+            entity.HasOne(e => e.Product)
+                .WithMany()
+                .HasForeignKey(e => e.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Order>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.OrderNumber).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.CustomerName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.CustomerPhone).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.CustomerEmail).HasMaxLength(255);
+            entity.Property(e => e.DeliveryMethod).HasMaxLength(50);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(50).HasDefaultValue("pending");
+            entity.Property(e => e.TotalAmount).HasColumnType("decimal(10,2)");
+            entity.HasIndex(e => e.OrderNumber).IsUnique();
+            entity.HasIndex(e => e.Status);
+        });
+
+        modelBuilder.Entity<OrderItem>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ProductName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.ProductPrice).HasColumnType("decimal(10,2)");
+            entity.HasOne(e => e.Order)
+                .WithMany(o => o.OrderItems)
+                .HasForeignKey(e => e.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Product)
+                .WithMany()
+                .HasForeignKey(e => e.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

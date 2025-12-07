@@ -198,52 +198,81 @@ public class ProductsController : ControllerBase
     [ProducesResponseType(typeof(ProductDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<ProductDto>> UpdateProduct(int id, [FromForm] UpdateProductDto dto, [FromForm] List<IFormFile>? images = null, [FromForm] List<string>? existingImages = null)
+    public async Task<ActionResult<ProductDto>> UpdateProduct(int id, [FromBody] UpdateProductDto dto)
     {
-        // Get existing product
-        var existingProduct = await _productService.GetProductByIdAsync(id);
-        if (existingProduct == null)
-            return NotFound();
-
-        var imagePaths = new List<string>();
-
-        // Add existing images that should be preserved (sent from frontend)
-        if (existingImages != null && existingImages.Any())
+        try
         {
-            imagePaths.AddRange(existingImages);
-        }
+            // Get existing product
+            var existingProduct = await _productService.GetProductByIdAsync(id);
+            if (existingProduct == null)
+                return NotFound();
 
-        // Add new uploaded images
-        if (images != null && images.Any())
-        {
-            var uploadsFolder = Path.Combine(_environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
-            if (!Directory.Exists(uploadsFolder))
+            var imagePaths = new List<string>();
+
+            // Add existing images that should be preserved (sent from frontend)
+            if (dto.ExistingImages != null && dto.ExistingImages.Any())
             {
-                Directory.CreateDirectory(uploadsFolder);
+                imagePaths.AddRange(dto.ExistingImages);
             }
 
-            foreach (var image in images)
+            // Add new uploaded images (base64)
+            if (dto.Images != null && dto.Images.Any())
             {
-                if (image.Length > 0)
+                var uploadsFolder = Path.Combine(_environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
+                if (!Directory.Exists(uploadsFolder))
                 {
-                    var fileName = $"{Guid.NewGuid()}{Path.GetExtension(image.FileName)}";
-                    var filePath = Path.Combine(uploadsFolder, fileName);
+                    Directory.CreateDirectory(uploadsFolder);
+                }
 
-                    using (var stream = new FileStream(filePath, FileMode.Create))
+                foreach (var base64Image in dto.Images)
+                {
+                    if (string.IsNullOrEmpty(base64Image)) continue;
+
+                    try
                     {
-                        await image.CopyToAsync(stream);
-                    }
+                        var base64Data = base64Image.Contains(",") 
+                            ? base64Image.Split(',')[1] 
+                            : base64Image;
+                        
+                        var imageBytes = Convert.FromBase64String(base64Data);
+                        
+                        var extension = ".jpg";
+                        if (imageBytes.Length > 2)
+                        {
+                            if (imageBytes[0] == 0x89 && imageBytes[1] == 0x50 && imageBytes[2] == 0x4E && imageBytes[3] == 0x47)
+                                extension = ".png";
+                            else if (imageBytes[0] == 0x47 && imageBytes[1] == 0x49 && imageBytes[2] == 0x46)
+                                extension = ".gif";
+                            else if (imageBytes[0] == 0x52 && imageBytes[1] == 0x49 && imageBytes[2] == 0x46 && imageBytes[3] == 0x46)
+                                extension = ".webp";
+                            else if (imageBytes[0] == 0xFF && imageBytes[1] == 0xD8)
+                                extension = ".jpeg";
+                        }
 
-                    imagePaths.Add($"/uploads/{fileName}");
+                        var fileName = $"{Guid.NewGuid()}{extension}";
+                        var filePath = Path.Combine(uploadsFolder, fileName);
+
+                        await System.IO.File.WriteAllBytesAsync(filePath, imageBytes);
+                        imagePaths.Add($"/uploads/{fileName}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Error processing new image for update: {ex.Message}");
+                    }
                 }
             }
+
+            var product = await _productService.UpdateProductAsync(id, dto, imagePaths);
+            if (product == null)
+                return NotFound();
+
+            return Ok(product);
         }
-
-        var product = await _productService.UpdateProductAsync(id, dto, imagePaths);
-        if (product == null)
-            return NotFound();
-
-        return Ok(product);
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] [ERROR] Exception in UpdateProduct: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "An error occurred while updating the product.", details = ex.Message });
+        }
     }
 
     /// <summary>

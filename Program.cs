@@ -180,9 +180,11 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
-// Add services
-builder.Services.AddScoped<IProductService, ProductService>();
-builder.Services.AddScoped<IAuthService, AuthService>();
+        // Add services
+        builder.Services.AddScoped<IProductService, ProductService>();
+        builder.Services.AddScoped<IAuthService, AuthService>();
+        builder.Services.AddScoped<IOrderService, OrderService>();
+        builder.Services.AddScoped<IEmailService, EmailService>();
 
 var app = builder.Build();
 

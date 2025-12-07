@@ -68,4 +68,19 @@ public class Product
     /// Gets or sets the date and time when the product was last updated
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    
+    /// <summary>
+    /// Gets or sets the quantity of products in stock
+    /// </summary>
+    public int QuantityInStock { get; set; } = 1;
+    
+    /// <summary>
+    /// Gets or sets the gender target (мальчик, девочка, унисекс)
+    /// </summary>
+    public string? Gender { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the product condition (новая, отличное, недостаток)
+    /// </summary>
+    public string? Condition { get; set; }
 }
