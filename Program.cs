@@ -27,6 +27,9 @@ builder.Services.Configure<FormOptions>(options =>
     options.MultipartBoundaryLengthLimit = int.MaxValue;
     options.KeyLengthLimit = int.MaxValue;
     options.ValueCountLimit = int.MaxValue;
+    options.BufferBody = true; // Включаем буферизацию для правильного чтения формы
+    options.BufferBodyLengthLimit = 10 * 1024 * 1024; // 10MB
+    options.MemoryBufferThreshold = 2 * 1024 * 1024; // 2MB - буферизация в памяти до 2MB
 });
 
 // Add services to the container
@@ -184,6 +187,20 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
+
+// Enable buffering for multipart requests BEFORE model binding
+app.Use(async (context, next) =>
+{
+    if (context.Request.Method == "POST" && 
+        context.Request.Path.StartsWithSegments("/api/products") &&
+        context.Request.ContentType?.Contains("multipart") == true)
+    {
+        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Enabling buffering for multipart request");
+        context.Request.EnableBuffering();
+        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Body.CanSeek after EnableBuffering: {context.Request.Body.CanSeek}");
+    }
+    await next();
+});
 
 // Simple request logging
 app.Use(async (context, next) =>

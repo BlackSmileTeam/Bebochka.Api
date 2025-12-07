@@ -90,35 +90,39 @@ public class ProductsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [RequestFormLimits(MultipartBodyLengthLimit = 10 * 1024 * 1024)] // 10MB
     [DisableRequestSizeLimit]
-    public async Task<ActionResult<ProductDto>> CreateProduct([FromForm] CreateProductDto dto, [FromForm] List<IFormFile>? images = null)
+    public async Task<ActionResult<ProductDto>> CreateProduct()
     {
         var startTime = DateTime.UtcNow;
         Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] CreateProduct STARTED");
         
         try
         {
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Checking DTO...");
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO is null: {dto == null}");
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Reading form manually...");
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] HasFormContentType: {Request.HasFormContentType}");
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Body.CanSeek: {Request.Body.CanSeek}");
             
-            if (dto == null)
+            // Включаем буферизацию, если еще не включена
+            if (!Request.Body.CanSeek)
             {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO is null, trying to read from Request.Form...");
-                // Попробуем прочитать из формы вручную
-                dto = new CreateProductDto
-                {
-                    Name = Request.Form["name"].ToString(),
-                    Brand = Request.Form["brand"].ToString(),
-                    Description = Request.Form["description"].ToString(),
-                    Price = decimal.TryParse(Request.Form["price"].ToString(), out var price) ? price : 0,
-                    Size = Request.Form["size"].ToString(),
-                    Color = Request.Form["color"].ToString()
-                };
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO created from form - Name: {dto.Name}");
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Enabling buffering...");
+                Request.EnableBuffering();
             }
-            else
+            
+            // Читаем форму вручную
+            var form = await Request.ReadFormAsync();
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Form read successfully. Keys: {string.Join(", ", form.Keys)}");
+            
+            // Создаем DTO из формы
+            var dto = new CreateProductDto
             {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO received - Name: {dto.Name}");
-            }
+                Name = form["name"].ToString(),
+                Brand = form["brand"].ToString(),
+                Description = form["description"].ToString(),
+                Price = decimal.TryParse(form["price"].ToString(), out var price) ? price : 0,
+                Size = form["size"].ToString(),
+                Color = form["color"].ToString()
+            };
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO created - Name: {dto.Name}");
             
             if (string.IsNullOrEmpty(dto.Name))
             {
@@ -126,11 +130,8 @@ public class ProductsController : ControllerBase
                 return BadRequest(new { message = "Product name is required" });
             }
             
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Getting files...");
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Images parameter is null: {images == null}");
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request.Form.Files count: {Request.Form.Files.Count}");
-            
-            var files = images ?? Request.Form.Files.ToList();
+            // Получаем файлы
+            var files = form.Files.ToList();
             Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Total files to process: {files.Count}");
             
             var imagePaths = new List<string>();
