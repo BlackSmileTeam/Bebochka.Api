@@ -76,8 +76,8 @@ public class CartController : ControllerBase
             return NotFound(new { message = "Product not found" });
 
         // Вычисляем доступное количество (общее - зарезервированное в других корзинах)
-        // Учитываем только активные резервы (не старше 30 минут)
-        var expirationTime = DateTime.UtcNow.AddMinutes(-30);
+        // Учитываем только активные резервы (не старше 20 минут)
+        var expirationTime = DateTime.UtcNow.AddMinutes(-20);
         var reservedQuantity = await _context.CartItems
             .Where(c => c.ProductId == dto.ProductId && 
                        c.SessionId != dto.SessionId &&
@@ -168,8 +168,8 @@ public class CartController : ControllerBase
             return NotFound();
 
         // Вычисляем доступное количество
-        // Учитываем только активные резервы (не старше 30 минут)
-        var expirationTime = DateTime.UtcNow.AddMinutes(-30);
+        // Учитываем только активные резервы (не старше 20 минут)
+        var expirationTime = DateTime.UtcNow.AddMinutes(-20);
         var reservedQuantity = await _context.CartItems
             .Where(c => c.ProductId == cartItem.ProductId && 
                        c.SessionId != cartItem.SessionId &&
@@ -241,11 +241,11 @@ public class CartController : ControllerBase
     }
 
     /// <summary>
-    /// Cleans up expired cart reservations (older than 30 minutes)
+    /// Cleans up expired cart reservations (older than 20 minutes)
     /// </summary>
     private async Task CleanupExpiredReservationsAsync()
     {
-        var expirationTime = DateTime.UtcNow.AddMinutes(-30);
+        var expirationTime = DateTime.UtcNow.AddMinutes(-20);
         var expiredItems = await _context.CartItems
             .Where(c => c.UpdatedAt < expirationTime)
             .ToListAsync();

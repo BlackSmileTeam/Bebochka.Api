@@ -185,6 +185,9 @@ builder.Services.AddAuthorization();
         builder.Services.AddScoped<IAuthService, AuthService>();
         builder.Services.AddScoped<IOrderService, OrderService>();
         builder.Services.AddScoped<IEmailService, EmailService>();
+        
+        // Add background service for cart cleanup
+        builder.Services.AddHostedService<CartCleanupService>();
 
 var app = builder.Build();
 

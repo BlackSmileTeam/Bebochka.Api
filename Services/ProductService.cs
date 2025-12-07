@@ -34,11 +34,11 @@ public class ProductService : IProductService
 
         // Вычисляем зарезервированное количество для каждого товара
         var productIds = products.Select(p => p.Id).ToList();
-        var expirationTime = DateTime.UtcNow.AddMinutes(-30);
+        var expirationTime = DateTime.UtcNow.AddMinutes(-20);
         var reservedItems = await _context.CartItems
             .Where(c => productIds.Contains(c.ProductId) && 
                        (sessionId == null || c.SessionId != sessionId) &&
-                       c.UpdatedAt > expirationTime) // Только активные резервы
+                       c.UpdatedAt > expirationTime) // Только активные резервы (не старше 20 минут)
             .GroupBy(c => c.ProductId)
             .Select(g => new { ProductId = g.Key, Reserved = g.Sum(c => c.Quantity) })
             .ToListAsync();
