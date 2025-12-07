@@ -77,6 +77,8 @@ builder.Services.AddCors(options =>
                 "http://localhost:5173", 
                 "http://localhost:3000",
                 "http://localhost:5000",
+                "http://89.104.67.36:55502",
+                "http://89.104.67.36:55501",
                 "http://127.0.0.1:5173",
                 "http://127.0.0.1:3000",
                 "http://127.0.0.1:5000",
