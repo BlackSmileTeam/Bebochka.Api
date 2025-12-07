@@ -93,15 +93,17 @@ builder.Services.AddSwaggerGen(c =>
     });
     
     // Add JWT authentication to Swagger
+    // Используем ApiKey вместо Http для лучшей совместимости с multipart запросами
     c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
-        Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer' [space] and then your token in the text input below.",
+        Description = "JWT Authorization header using the Bearer scheme. Введите ТОЛЬКО токен (без 'Bearer '). Swagger автоматически добавит префикс 'Bearer '.",
         Name = "Authorization",
         In = Microsoft.OpenApi.Models.ParameterLocation.Header,
         Type = Microsoft.OpenApi.Models.SecuritySchemeType.ApiKey,
         Scheme = "Bearer"
     });
     
+    // Применяем авторизацию ко всем endpoints
     c.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
     {
         {
@@ -183,6 +185,71 @@ builder.Services.AddAuthentication(options =>
         ValidateLifetime = true,
         ClockSkew = TimeSpan.Zero
     };
+    
+    // Добавляем логирование для диагностики проблем с авторизацией
+    options.Events = new JwtBearerEvents
+    {
+        OnAuthenticationFailed = context =>
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Authentication failed: {context.Exception.Message}");
+            if (context.Exception.InnerException != null)
+            {
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Inner exception: {context.Exception.InnerException.Message}");
+            }
+            return Task.CompletedTask;
+        },
+        OnChallenge = context =>
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Challenge triggered. Error: {context.Error}, ErrorDescription: {context.ErrorDescription}");
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Request Path: {context.Request.Path}");
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Authorization header present: {context.Request.Headers.ContainsKey("Authorization")}");
+            if (context.Request.Headers.ContainsKey("Authorization"))
+            {
+                var authHeader = context.Request.Headers["Authorization"].ToString();
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Authorization header value: {(authHeader.Length > 20 ? authHeader.Substring(0, 20) + "..." : authHeader)}");
+            }
+            return Task.CompletedTask;
+        },
+        OnTokenValidated = context =>
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Token validated successfully for user: {context.Principal?.Identity?.Name}");
+            return Task.CompletedTask;
+        },
+        OnMessageReceived = context =>
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Message received. Path: {context.Request.Path}");
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Content-Type: {context.Request.ContentType}");
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Authorization header present: {context.Request.Headers.ContainsKey("Authorization")}");
+            
+            if (context.Request.Headers.ContainsKey("Authorization"))
+            {
+                var authHeader = context.Request.Headers["Authorization"].ToString();
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Authorization header value (full): {authHeader}");
+                
+                // Если токен приходит без префикса "Bearer ", добавляем его автоматически
+                if (!authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase) && authHeader.Contains("."))
+                {
+                    // Это похоже на JWT токен без префикса - добавляем "Bearer "
+                    var tokenWithBearer = "Bearer " + authHeader;
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Adding 'Bearer ' prefix automatically");
+                    context.Request.Headers["Authorization"] = tokenWithBearer;
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Updated Authorization header: Bearer {authHeader.Substring(0, Math.Min(50, authHeader.Length))}...");
+                }
+                else if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                {
+                    var token = authHeader.Substring(7); // Убираем "Bearer "
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Token extracted (first 50 chars): {(token.Length > 50 ? token.Substring(0, 50) + "..." : token)}");
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] Token contains dots (JWT format): {token.Contains(".")}");
+                }
+                else
+                {
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [JWT] WARNING: Authorization header doesn't start with 'Bearer ' and doesn't look like a JWT token");
+                }
+            }
+            
+            return Task.CompletedTask;
+        }
+    };
 });
 
 builder.Services.AddAuthorization();
@@ -218,6 +285,24 @@ app.Use(async (context, next) =>
         if (isMultipart)
         {
             Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Multipart request detected - skipping body reading to avoid blocking");
+            // Логируем заголовок Authorization для multipart запросов
+            if (context.Request.Headers.ContainsKey("Authorization"))
+            {
+                var authHeader = context.Request.Headers["Authorization"].ToString();
+                Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Authorization header (full): {authHeader}");
+                Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Authorization header length: {authHeader.Length}");
+                
+                // Проверяем, что это действительно токен (должен содержать точки для JWT)
+                if (!authHeader.Contains(".") && authHeader.StartsWith("Bearer "))
+                {
+                    Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] WARNING: Authorization header doesn't look like a valid JWT token!");
+                    Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Expected format: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] WARNING: Authorization header is MISSING for multipart request!");
+            }
         }
         
         // Для multipart запросов НЕ перехватываем response body, чтобы не блокировать
@@ -277,11 +362,17 @@ app.Use(async (context, next) =>
 // CORS must be very early in the pipeline, before UseRouting
 app.UseCors("AllowReactApp");
 
+// Authentication and Authorization must be before UseRouting
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "Bebochka API v1");
     c.RoutePrefix = "swagger";
+    // Показываем время выполнения запроса
+    c.DisplayRequestDuration();
 });
 
 // Serve static files (for uploaded images)
@@ -296,9 +387,6 @@ app.UseStaticFiles(new StaticFileOptions
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(wwwrootPath),
     RequestPath = ""
 });
-
-app.UseAuthentication();
-app.UseAuthorization();
 
 app.MapControllers();
 
