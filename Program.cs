@@ -15,7 +15,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Configure Kestrel
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.Limits.MaxRequestBodySize = 10 * 1024 * 1024; // 10MB
+    options.Limits.MaxRequestBodySize = 15 * 1024 * 1024; // 15MB для base64 JSON
     // Отключаем проверку скорости передачи данных
     options.Limits.MinRequestBodyDataRate = null;
     options.Limits.MinResponseDataRate = null;
