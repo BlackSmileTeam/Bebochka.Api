@@ -44,7 +44,7 @@ builder.Services.Configure<FormOptions>(options =>
     options.BufferBody = true; // Буферизуем тело запроса для правильного биндинга модели
     options.BufferBodyLengthLimit = 52428800; // 50MB
     options.KeyLengthLimit = int.MaxValue;
-    options.MemoryBufferThreshold = 1024 * 1024; // 1MB - после этого пишем на диск
+    options.MemoryBufferThreshold = 10 * 1024 * 1024; // 10MB - увеличиваем порог для буферизации в памяти
 });
 
 // Add services to the container

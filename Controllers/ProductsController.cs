@@ -136,9 +136,9 @@ public class ProductsController : ControllerBase
                         var fileName = $"{Guid.NewGuid()}{Path.GetExtension(image.FileName)}";
                         var filePath = Path.Combine(uploadsFolder, fileName);
 
-                        using (var stream = new FileStream(filePath, FileMode.Create))
+                        using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, FileOptions.Asynchronous))
                         {
-                            await image.CopyToAsync(stream);
+                            await image.CopyToAsync(stream, 81920); // Используем буфер 80KB для более быстрой записи
                         }
 
                         imagePaths.Add($"/uploads/{fileName}");
