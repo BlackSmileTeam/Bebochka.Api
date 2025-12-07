@@ -105,12 +105,30 @@ public class ProductsController : ControllerBase
             Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Reading form...");
             Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request body can seek: {Request.Body.CanSeek}");
             Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request body can read: {Request.Body.CanRead}");
+            Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request body position: {Request.Body.Position}");
             
-            // Включаем буферизацию вручную, если она еще не включена
+            // Если буферизация не включена, пытаемся включить (хотя это должно быть сделано в middleware)
             if (!Request.Body.CanSeek)
             {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Enabling request buffering...");
-                Request.EnableBuffering();
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] WARNING: Body cannot seek, trying to enable buffering...");
+                try
+                {
+                    Request.EnableBuffering();
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Buffering enabled, can seek now: {Request.Body.CanSeek}");
+                }
+                catch (Exception buffEx)
+                {
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR enabling buffering: {buffEx.Message}");
+                }
+            }
+            else
+            {
+                // Сбрасываем позицию потока на начало, если буферизация включена
+                if (Request.Body.Position > 0)
+                {
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Resetting body position to 0 (was {Request.Body.Position})");
+                    Request.Body.Position = 0;
+                }
             }
             
             // Используем CancellationToken с таймаутом для чтения формы

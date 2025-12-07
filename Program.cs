@@ -267,12 +267,26 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
+// ВАЖНО: Включаем буферизацию ДО всех middleware для multipart запросов
+app.Use(async (context, next) =>
+{
+    var isMultipart = context.Request.ContentType?.Contains("multipart") == true;
+    if (isMultipart && context.Request.Method == "POST")
+    {
+        // Включаем буферизацию в самом начале для multipart запросов
+        context.Request.EnableBuffering();
+        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [BUFFERING] Enabled buffering for multipart request: {context.Request.Path}");
+    }
+    await next();
+});
+
 // Add request logging middleware - должно быть ПЕРЕД CORS
 // ВАЖНО: Для multipart запросов НЕ читаем body, чтобы не блокировать поток
 app.Use(async (context, next) =>
 {
     var startTime = DateTime.UtcNow;
     var requestId = Guid.NewGuid().ToString("N")[..8];
+    context.Items["RequestId"] = requestId;
     var isMultipart = context.Request.ContentType?.Contains("multipart") == true;
     
     try
@@ -287,6 +301,7 @@ app.Use(async (context, next) =>
         Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Authorization: {(context.Request.Headers.ContainsKey("Authorization") ? "Present" : "Missing")}");
         Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] User-Agent: {context.Request.Headers["User-Agent"]}");
         Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] HasFormContentType: {context.Request.HasFormContentType}");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Body can seek: {context.Request.Body.CanSeek}");
         
         if (isMultipart)
         {
