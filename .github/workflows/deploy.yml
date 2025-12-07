@@ -147,27 +147,27 @@ jobs:
         username: ${{ secrets.SSH_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: ${{ env.SSH_PORT }}
-        envs: DB_CONNECTION_STRING
+        envs: DB_CONNECTION_STRING,CONTAINER_PORT,HOST_PORT,IMAGE_NAME,DEPLOY_DIR
         script: |
           #!/bin/bash
           set -euo pipefail
 
           # Stop existing container
-          docker stop ${{ env.IMAGE_NAME }} || true
-          docker rm ${{ env.IMAGE_NAME }} || true
+          docker stop $IMAGE_NAME || true
+          docker rm $IMAGE_NAME || true
 
           # Pull and run new container
-          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.docker_tag }}
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/$IMAGE_NAME:${{ needs.build.outputs.docker_tag }}
           
           docker run -d \
-            --name ${{ env.IMAGE_NAME }} \
+            --name $IMAGE_NAME \
             --restart unless-stopped \
-            -p ${{ env.HOST_PORT }}:${{ env.CONTAINER_PORT }} \
-            -v ${{ env.DEPLOY_DIR }}/uploads:/app/wwwroot/uploads \
+            -p $HOST_PORT:$CONTAINER_PORT \
+            -v $DEPLOY_DIR/uploads:/app/wwwroot/uploads \
             -e ASPNETCORE_ENVIRONMENT=Production \
             -e ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING" \
-            -e ASPNETCORE_URLS=http://+:{{ env.CONTAINER_PORT }} \
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.docker_tag }}
+            -e ASPNETCORE_URLS=http://+:$CONTAINER_PORT \
+            ${{ secrets.DOCKERHUB_USERNAME }}/$IMAGE_NAME:${{ needs.build.outputs.docker_tag }}
 
           # Clean up old images
           docker image prune -f
@@ -175,6 +175,10 @@ jobs:
           echo "=== Deployment successful ==="
       env:
         DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+        CONTAINER_PORT: ${{ env.CONTAINER_PORT }}
+        HOST_PORT: ${{ env.HOST_PORT }}
+        IMAGE_NAME: ${{ env.IMAGE_NAME }}
+        DEPLOY_DIR: ${{ env.DEPLOY_DIR }}
 
   post-deploy-test:
     needs: [deploy, test-connection]
