@@ -90,156 +90,49 @@ public class ProductsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [RequestFormLimits(MultipartBodyLengthLimit = 52428800)] // 50MB
     [DisableRequestSizeLimit]
-    public async Task<ActionResult<ProductDto>> CreateProduct()
+    public async Task<ActionResult<ProductDto>> CreateProduct([FromForm] CreateProductDto dto, [FromForm] List<IFormFile>? images = null)
     {
-        var startTime = DateTime.UtcNow;
         try
         {
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] CreateProduct STARTED");
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request ContentType: {Request.ContentType}");
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request HasFormContentType: {Request.HasFormContentType}");
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request ContentLength: {Request.ContentLength}");
-            
-            // Читаем форму вручную, чтобы избежать проблем с автоматическим биндингом
-            var formReadStart = DateTime.UtcNow;
-            Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Reading form...");
-            Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request body can seek: {Request.Body.CanSeek}");
-            Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request body can read: {Request.Body.CanRead}");
-            Console.WriteLine($"[{formReadStart:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request body position: {Request.Body.Position}");
-            
-            // Если буферизация не включена, пытаемся включить (хотя это должно быть сделано в middleware)
-            if (!Request.Body.CanSeek)
+            if (dto == null || string.IsNullOrEmpty(dto.Name))
             {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] WARNING: Body cannot seek, trying to enable buffering...");
-                try
-                {
-                    Request.EnableBuffering();
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Buffering enabled, can seek now: {Request.Body.CanSeek}");
-                }
-                catch (Exception buffEx)
-                {
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR enabling buffering: {buffEx.Message}");
-                }
-            }
-            else
-            {
-                // Сбрасываем позицию потока на начало, если буферизация включена
-                if (Request.Body.Position > 0)
-                {
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Resetting body position to 0 (was {Request.Body.Position})");
-                    Request.Body.Position = 0;
-                }
-            }
-            
-            // Используем CancellationToken с таймаутом для чтения формы
-            using var formReadCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-            var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(formReadCts.Token, Request.HttpContext.RequestAborted);
-            
-            IFormCollection form;
-            try
-            {
-                form = await Request.ReadFormAsync(linkedCts.Token);
-                var formReadEnd = DateTime.UtcNow;
-                var formReadDuration = (formReadEnd - formReadStart).TotalMilliseconds;
-                Console.WriteLine($"[{formReadEnd:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Form read successfully in {formReadDuration:F2} ms. Form keys: {string.Join(", ", form.Keys)}");
-            }
-            catch (OperationCanceledException)
-            {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR: Form reading was cancelled or timed out");
-                return StatusCode(408, new { message = "Request timeout while reading form data" });
-            }
-            catch (Exception formEx)
-            {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR reading form: {formEx.Message}");
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Exception type: {formEx.GetType().Name}");
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] StackTrace: {formEx.StackTrace}");
-                if (formEx.InnerException != null)
-                {
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Inner exception: {formEx.InnerException.Message}");
-                }
-                return StatusCode(400, new { message = "Failed to read form data", details = formEx.Message });
-            }
-            
-            // Создаем DTO из формы
-            var dto = new CreateProductDto
-            {
-                Name = form["name"].ToString(),
-                Brand = form["brand"].ToString(),
-                Description = form["description"].ToString(),
-                Price = decimal.TryParse(form["price"].ToString(), out var price) ? price : 0,
-                Size = form["size"].ToString(),
-                Color = form["color"].ToString()
-            };
-            
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO created - Name: {dto.Name}, Brand: {dto.Brand}, Price: {dto.Price}");
-            
-            // Получаем файлы из формы
-            var files = form.Files.ToList();
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Files from form: {files.Count}");
-            
-            if (string.IsNullOrEmpty(dto.Name))
-            {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR: Product name is required");
                 return BadRequest(new { message = "Product name is required" });
             }
-        
+            
+            var files = images ?? Request.Form.Files.ToList();
             var imagePaths = new List<string>();
 
             if (files != null && files.Any())
             {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Processing {files.Count} images");
                 var uploadsFolder = Path.Combine(_environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
                 if (!Directory.Exists(uploadsFolder))
                 {
                     Directory.CreateDirectory(uploadsFolder);
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] Created uploads folder: {uploadsFolder}");
                 }
 
                 foreach (var image in files)
                 {
                     if (image.Length > 0)
                     {
-                        var fileStartTime = DateTime.UtcNow;
-                        Console.WriteLine($"[{fileStartTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Processing image: {image.FileName}, Size: {image.Length} bytes, ContentType: {image.ContentType}");
                         var fileName = $"{Guid.NewGuid()}{Path.GetExtension(image.FileName)}";
                         var filePath = Path.Combine(uploadsFolder, fileName);
 
-                        using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, FileOptions.Asynchronous))
+                        using (var stream = new FileStream(filePath, FileMode.Create))
                         {
-                            await image.CopyToAsync(stream); // Используем асинхронную запись с буфером 80KB (указан в конструкторе FileStream)
+                            await image.CopyToAsync(stream);
                         }
 
                         imagePaths.Add($"/uploads/{fileName}");
-                        var fileEndTime = DateTime.UtcNow;
-                        var fileDuration = (fileEndTime - fileStartTime).TotalMilliseconds;
-                        Console.WriteLine($"[{fileEndTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Saved image: {filePath} (took {fileDuration:F2} ms)");
                     }
                 }
             }
 
-            var dbStartTime = DateTime.UtcNow;
-            Console.WriteLine($"[{dbStartTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Creating product in database...");
             var product = await _productService.CreateProductAsync(dto, imagePaths);
-            var dbEndTime = DateTime.UtcNow;
-            var dbDuration = (dbEndTime - dbStartTime).TotalMilliseconds;
-            Console.WriteLine($"[{dbEndTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Product created with ID: {product.Id} (DB operation took {dbDuration:F2} ms)");
-            
-            var totalDuration = (DateTime.UtcNow - startTime).TotalMilliseconds;
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] CreateProduct COMPLETED (total duration: {totalDuration:F2} ms)");
-            
             return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
         }
         catch (Exception ex)
         {
-            var errorTime = DateTime.UtcNow;
-            var totalDuration = (errorTime - startTime).TotalMilliseconds;
-            Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR after {totalDuration:F2} ms: {ex.Message}");
-            Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Exception Type: {ex.GetType().Name}");
-            Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] StackTrace: {ex.StackTrace}");
-            if (ex.InnerException != null)
-            {
-                Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Inner Exception: {ex.InnerException.Message}");
-            }
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR: {ex.Message}");
             return StatusCode(500, new { message = "Internal server error", error = ex.Message });
         }
     }
