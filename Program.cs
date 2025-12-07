@@ -15,13 +15,13 @@ var builder = WebApplication.CreateBuilder(args);
 // Configure Kestrel
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.Limits.MaxRequestBodySize = 50 * 1024 * 1024; // 50MB
+    options.Limits.MaxRequestBodySize = 10 * 1024 * 1024; // 10MB
 });
 
-// Configure form options for large file uploads
+// Configure form options for file uploads (max 10MB)
 builder.Services.Configure<FormOptions>(options =>
 {
-    options.MultipartBodyLengthLimit = 52428800; // 50MB
+    options.MultipartBodyLengthLimit = 10 * 1024 * 1024; // 10MB
     options.ValueLengthLimit = int.MaxValue;
     options.MultipartHeadersLengthLimit = int.MaxValue;
     options.MultipartBoundaryLengthLimit = int.MaxValue;
@@ -185,12 +185,22 @@ var app = builder.Build();
 
 // Configure the HTTP request pipeline
 
-        // CORS must be very early in the pipeline, before UseRouting
-        app.UseCors("AllowReactApp");
+// Simple request logging
+app.Use(async (context, next) =>
+{
+    if (context.Request.Method == "POST" && context.Request.Path.StartsWithSegments("/api/products"))
+    {
+        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] POST /api/products - ContentType: {context.Request.ContentType}, ContentLength: {context.Request.ContentLength}");
+    }
+    await next();
+});
 
-        // Authentication and Authorization must be before UseRouting
-        app.UseAuthentication();
-        app.UseAuthorization();
+// CORS must be very early in the pipeline, before UseRouting
+app.UseCors("AllowReactApp");
+
+// Authentication and Authorization must be before UseRouting
+app.UseAuthentication();
+app.UseAuthorization();
 
 
 app.UseSwagger();

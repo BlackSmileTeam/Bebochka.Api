@@ -88,7 +88,7 @@ public class ProductsController : ControllerBase
     [ProducesResponseType(typeof(ProductDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [RequestFormLimits(MultipartBodyLengthLimit = 52428800)] // 50MB
+    [RequestFormLimits(MultipartBodyLengthLimit = 10 * 1024 * 1024)] // 10MB
     [DisableRequestSizeLimit]
     public async Task<ActionResult<ProductDto>> CreateProduct([FromForm] CreateProductDto dto, [FromForm] List<IFormFile>? images = null)
     {
