@@ -99,28 +99,6 @@ public class UsersController : ControllerBase
     }
 
     /// <summary>
-    /// Gets all users
-    /// </summary>
-    /// <returns>List of users</returns>
-    [HttpGet]
-    [ProducesResponseType(typeof(List<UserDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<UserDto>>> GetUsers()
-    {
-        var users = await _context.Users
-            .OrderBy(u => u.Username)
-            .Select(u => new UserDto
-            {
-                Id = u.Id,
-                Username = u.Username,
-                Email = u.Email,
-                FullName = u.FullName
-            })
-            .ToListAsync();
-
-        return Ok(users);
-    }
-
-    /// <summary>
     /// Gets a user by ID
     /// </summary>
     /// <param name="id">User ID</param>
