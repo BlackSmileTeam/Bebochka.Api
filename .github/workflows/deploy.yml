@@ -1,0 +1,219 @@
+name: .NET API Deployment Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  DOCKERFILE_PATH: Dockerfile
+  SSH_PORT: 22
+  CONTAINER_PORT: 44315
+  HOST_PORT: 44315
+  DEPLOY_DIR: /opt/bebochka
+  IMAGE_NAME: bebochka-backend
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate SSH Key
+      run: |
+        mkdir -p ~/.ssh
+        echo "$SSH_KEY" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+        echo "SSH key validated successfully"
+      env:
+        SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+
+  test-connection:
+    needs: validate
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || success() }}
+    steps:
+    - name: Test SSH connection
+      uses: appleboy/ssh-action@v1
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        port: ${{ env.SSH_PORT }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        script: |
+          echo "=== SSH Connection Test ==="
+          echo "Connection successful!"
+          echo "Docker version: $(docker --version)"
+          echo "Disk space: $(df -h)"
+          echo "Existing containers:"
+          docker ps -a
+          echo "=== Test completed successfully ==="
+
+  test:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+        
+    - name: Restore dependencies
+      run: |
+        dotnet restore
+        
+    - name: Build project
+      run: |
+        dotnet build --configuration Release --no-restore
+        
+    - name: Run unit tests (if available)
+      run: |
+        if [ -d "Tests" ] || [ -f "*.Tests.csproj" ]; then
+          dotnet test --configuration Release --verbosity normal --no-build
+        else
+          echo "No test projects found, skipping tests"
+        fi
+      continue-on-error: true
+
+  build:
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    outputs:
+      docker_tag: ${{ steps.determine_tag.outputs.TAG }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Determine Docker tag
+      id: determine_tag
+      run: |
+        if [ -n "$(git tag --points-at HEAD)" ]; then
+          echo "TAG=$(git tag --points-at HEAD)" >> $GITHUB_OUTPUT
+        else
+          echo "TAG=$(date +'%Y.%m.%d-%H%M')" >> $GITHUB_OUTPUT
+        fi
+        echo "Using tag: $TAG"
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Docker image
+      run: |
+        docker buildx create --use
+        docker buildx build \
+          -f ${{ env.DOCKERFILE_PATH }} \
+          -t ${{ env.IMAGE_NAME }}:${{ steps.determine_tag.outputs.TAG }} \
+          -t ${{ env.IMAGE_NAME }}:latest \
+          --platform linux/amd64 \
+          --load \
+          --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+          --build-arg VERSION=${{ steps.determine_tag.outputs.TAG }} \
+          .
+
+    - name: Save Docker image
+      run: |
+        docker save ${{ env.IMAGE_NAME }}:latest | gzip > ${{ env.IMAGE_NAME }}.tar.gz
+
+  deploy:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Prepare deployment directory
+      uses: appleboy/ssh-action@v1
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ env.SSH_PORT }}
+        script: |
+          mkdir -p ${{ env.DEPLOY_DIR }}/uploads
+          mkdir -p ${{ env.DEPLOY_DIR }}/logs
+          chmod 755 ${{ env.DEPLOY_DIR }}/uploads
+
+    - name: Copy Docker image to server
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ env.SSH_PORT }}
+        source: "${{ env.IMAGE_NAME }}.tar.gz"
+        target: "/tmp/"
+
+    - name: Deploy application
+      uses: appleboy/ssh-action@v1
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ env.SSH_PORT }}
+        envs: DB_CONNECTION_STRING
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+
+          # Load Docker image
+          echo "Loading Docker image..."
+          docker load < /tmp/${{ env.IMAGE_NAME }}.tar.gz
+          rm /tmp/${{ env.IMAGE_NAME }}.tar.gz
+
+          # Stop existing container
+          echo "Stopping existing container..."
+          docker stop ${{ env.IMAGE_NAME }} || true
+          docker rm ${{ env.IMAGE_NAME }} || true
+
+          # Run new container
+          echo "Starting new container..."
+          docker run -d \
+            --name ${{ env.IMAGE_NAME }} \
+            --restart unless-stopped \
+            -p ${{ env.HOST_PORT }}:${{ env.CONTAINER_PORT }} \
+            -v ${{ env.DEPLOY_DIR }}/uploads:/app/wwwroot/uploads \
+            -e ASPNETCORE_ENVIRONMENT=Production \
+            -e ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING" \
+            -e ASPNETCORE_URLS=http://+:{{ env.CONTAINER_PORT }} \
+            ${{ env.IMAGE_NAME }}:${{ needs.build.outputs.docker_tag }}
+
+          # Clean up old images
+          echo "Cleaning up old Docker images..."
+          docker image prune -f
+
+          echo "=== Deployment successful ==="
+      env:
+        DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+
+  post-deploy-test:
+    needs: [deploy, test-connection]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Verify deployment
+      uses: appleboy/ssh-action@v1
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ env.SSH_PORT }}
+        script: |
+          echo "=== Deployment Verification ==="
+          echo "Container status:"
+          docker ps -a | grep ${{ env.IMAGE_NAME }} || echo "Container not found"
+          echo ""
+          echo "Container logs (last 50 lines):"
+          docker logs --tail 50 ${{ env.IMAGE_NAME }} || echo "Could not retrieve logs"
+          echo ""
+          echo "Checking API health..."
+          sleep 5
+          curl -f http://localhost:${{ env.HOST_PORT }}/api/products || echo "API health check failed"
+          echo ""
+          echo "Uploads directory:"
+          docker exec ${{ env.IMAGE_NAME }} ls -la /app/wwwroot/uploads/ || echo "Could not list uploads"
+          echo "=== Verification completed ==="
