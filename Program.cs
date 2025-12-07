@@ -8,6 +8,7 @@ using Bebochka.Api.Models;
 using Pomelo.EntityFrameworkCore.MySql.Infrastructure;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -73,6 +74,23 @@ builder.Services.AddSwaggerGen(c =>
     {
         c.IncludeXmlComments(xmlPath);
     }
+    
+    // Настройка для поддержки загрузки файлов в Swagger
+    c.MapType<IFormFile>(() => new Microsoft.OpenApi.Models.OpenApiSchema
+    {
+        Type = "string",
+        Format = "binary"
+    });
+    
+    c.MapType<System.Collections.Generic.List<IFormFile>>(() => new Microsoft.OpenApi.Models.OpenApiSchema
+    {
+        Type = "array",
+        Items = new Microsoft.OpenApi.Models.OpenApiSchema
+        {
+            Type = "string",
+            Format = "binary"
+        }
+    });
     
     // Add JWT authentication to Swagger
     c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
@@ -179,15 +197,28 @@ var app = builder.Build();
 // Add request logging middleware - должно быть ПЕРЕД CORS
 app.Use(async (context, next) =>
 {
+    var startTime = DateTime.UtcNow;
+    var requestId = Guid.NewGuid().ToString("N")[..8];
+    
     try
     {
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] ========== INCOMING REQUEST ==========");
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Method: {context.Request.Method}");
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Path: {context.Request.Path}{context.Request.QueryString}");
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Origin: {context.Request.Headers["Origin"]}");
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Content-Type: {context.Request.ContentType}");
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Content-Length: {context.Request.ContentLength}");
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Authorization: {(context.Request.Headers.ContainsKey("Authorization") ? "Present" : "Missing")}");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] ========== INCOMING REQUEST ==========");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Method: {context.Request.Method}");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Path: {context.Request.Path}{context.Request.QueryString}");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Remote IP: {context.Connection.RemoteIpAddress}");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Origin: {context.Request.Headers["Origin"]}");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Content-Type: {context.Request.ContentType}");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Content-Length: {context.Request.ContentLength}");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Authorization: {(context.Request.Headers.ContainsKey("Authorization") ? "Present" : "Missing")}");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] User-Agent: {context.Request.Headers["User-Agent"]}");
+        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] HasFormContentType: {context.Request.HasFormContentType}");
+        
+        // Логируем все заголовки для multipart запросов
+        if (context.Request.ContentType?.Contains("multipart") == true)
+        {
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Multipart boundary detected");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Form.Files.Count: {context.Request.Form?.Files?.Count ?? 0}");
+        }
         
         var originalBodyStream = context.Response.Body;
         using var responseBody = new MemoryStream();
@@ -195,22 +226,34 @@ app.Use(async (context, next) =>
         
         await next();
         
+        var endTime = DateTime.UtcNow;
+        var duration = (endTime - startTime).TotalMilliseconds;
+        
         responseBody.Seek(0, SeekOrigin.Begin);
         var responseBodyText = await new StreamReader(responseBody).ReadToEndAsync();
         responseBody.Seek(0, SeekOrigin.Begin);
         await responseBody.CopyToAsync(originalBodyStream);
         
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Status Code: {context.Response.StatusCode}");
+        Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Status Code: {context.Response.StatusCode}");
+        Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Duration: {duration:F2} ms");
+        Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Response Size: {responseBodyText.Length} bytes");
         if (responseBodyText.Length > 0 && responseBodyText.Length < 1000)
         {
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] Response Body: {responseBodyText}");
+            Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Response Body: {responseBodyText}");
         }
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] ========== END REQUEST ==========");
+        Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] ========== END REQUEST ==========");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ERROR] Exception in middleware: {ex.Message}");
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ERROR] StackTrace: {ex.StackTrace}");
+        var errorTime = DateTime.UtcNow;
+        var duration = (errorTime - startTime).TotalMilliseconds;
+        Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ERROR] Exception after {duration:F2} ms: {ex.Message}");
+        Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ERROR] Exception Type: {ex.GetType().Name}");
+        Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ERROR] StackTrace: {ex.StackTrace}");
+        if (ex.InnerException != null)
+        {
+            Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] [ERROR] Inner Exception: {ex.InnerException.Message}");
+        }
         throw;
     }
 });

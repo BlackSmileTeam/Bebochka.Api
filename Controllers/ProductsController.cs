@@ -63,42 +63,63 @@ public class ProductsController : ControllerBase
     /// Creates a new product with images
     /// </summary>
     /// <param name="dto">Product data transfer object</param>
-    /// <param name="images">Product images</param>
+    /// <param name="images">Product images (multipart/form-data)</param>
     /// <returns>Created product</returns>
     /// <response code="201">Product created successfully</response>
     /// <response code="400">Invalid input data</response>
     /// <response code="401">Unauthorized</response>
+    /// <remarks>
+    /// Sample request:
+    /// 
+    ///     POST /api/products
+    ///     Content-Type: multipart/form-data
+    ///     
+    ///     Name: "Детская куртка"
+    ///     Brand: "Zara"
+    ///     Description: "Описание товара"
+    ///     Price: 1500
+    ///     Size: "104"
+    ///     Color: "Синий"
+    ///     Images: [file1.jpg, file2.jpg]
+    /// </remarks>
     [HttpPost]
     [Authorize]
+    [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(ProductDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [RequestFormLimits(MultipartBodyLengthLimit = 52428800)] // 50MB
     [DisableRequestSizeLimit]
-    public async Task<ActionResult<ProductDto>> CreateProduct([FromForm] CreateProductDto dto)
+    public async Task<ActionResult<ProductDto>> CreateProduct([FromForm] CreateProductDto dto, [FromForm] List<IFormFile>? images = null)
     {
+        var startTime = DateTime.UtcNow;
         try
         {
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] CreateProduct STARTED");
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] DTO Name: {dto?.Name ?? "NULL"}");
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] Request ContentType: {Request.ContentType}");
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] Request HasFormContentType: {Request.HasFormContentType}");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] CreateProduct STARTED");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO Name: {dto?.Name ?? "NULL"}");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO Brand: {dto?.Brand ?? "NULL"}");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO Price: {dto?.Price}");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request ContentType: {Request.ContentType}");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request HasFormContentType: {Request.HasFormContentType}");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Request ContentLength: {Request.ContentLength}");
             
-            // Получаем файлы из Request.Form напрямую
-            var images = Request.Form.Files;
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] Files count from Request.Form: {images?.Count ?? 0}");
+            // Получаем файлы из параметра или из Request.Form напрямую
+            var files = images ?? Request.Form.Files.ToList();
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Files from parameter: {images?.Count ?? 0}");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Files from Request.Form: {Request.Form.Files.Count}");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Total files to process: {files.Count}");
             
             if (dto == null)
             {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] ERROR: DTO is null");
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR: DTO is null");
                 return BadRequest(new { message = "Product data is required" });
             }
         
             var imagePaths = new List<string>();
 
-            if (images != null && images.Any())
+            if (files != null && files.Any())
             {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] Processing {images.Count} images");
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Processing {files.Count} images");
                 var uploadsFolder = Path.Combine(_environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
                 if (!Directory.Exists(uploadsFolder))
                 {
@@ -106,11 +127,12 @@ public class ProductsController : ControllerBase
                     Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] Created uploads folder: {uploadsFolder}");
                 }
 
-                foreach (var image in images)
+                foreach (var image in files)
                 {
                     if (image.Length > 0)
                     {
-                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] Processing image: {image.FileName}, Size: {image.Length} bytes");
+                        var fileStartTime = DateTime.UtcNow;
+                        Console.WriteLine($"[{fileStartTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Processing image: {image.FileName}, Size: {image.Length} bytes, ContentType: {image.ContentType}");
                         var fileName = $"{Guid.NewGuid()}{Path.GetExtension(image.FileName)}";
                         var filePath = Path.Combine(uploadsFolder, fileName);
 
@@ -120,22 +142,36 @@ public class ProductsController : ControllerBase
                         }
 
                         imagePaths.Add($"/uploads/{fileName}");
-                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] Saved image: {filePath}");
+                        var fileEndTime = DateTime.UtcNow;
+                        var fileDuration = (fileEndTime - fileStartTime).TotalMilliseconds;
+                        Console.WriteLine($"[{fileEndTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Saved image: {filePath} (took {fileDuration:F2} ms)");
                     }
                 }
             }
 
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] Creating product in database...");
+            var dbStartTime = DateTime.UtcNow;
+            Console.WriteLine($"[{dbStartTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Creating product in database...");
             var product = await _productService.CreateProductAsync(dto, imagePaths);
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] Product created with ID: {product.Id}");
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] CreateProduct COMPLETED");
+            var dbEndTime = DateTime.UtcNow;
+            var dbDuration = (dbEndTime - dbStartTime).TotalMilliseconds;
+            Console.WriteLine($"[{dbEndTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Product created with ID: {product.Id} (DB operation took {dbDuration:F2} ms)");
+            
+            var totalDuration = (DateTime.UtcNow - startTime).TotalMilliseconds;
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] CreateProduct COMPLETED (total duration: {totalDuration:F2} ms)");
             
             return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] ERROR: {ex.Message}");
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}] [ProductsController] StackTrace: {ex.StackTrace}");
+            var errorTime = DateTime.UtcNow;
+            var totalDuration = (errorTime - startTime).TotalMilliseconds;
+            Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR after {totalDuration:F2} ms: {ex.Message}");
+            Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Exception Type: {ex.GetType().Name}");
+            Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] StackTrace: {ex.StackTrace}");
+            if (ex.InnerException != null)
+            {
+                Console.WriteLine($"[{errorTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Inner Exception: {ex.InnerException.Message}");
+            }
             return StatusCode(500, new { message = "Internal server error", error = ex.Message });
         }
     }
