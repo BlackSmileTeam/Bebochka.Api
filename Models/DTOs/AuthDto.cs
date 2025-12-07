@@ -66,5 +66,21 @@ public class UserDto
     /// Gets or sets the full name
     /// </summary>
     public string? FullName { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the creation date
+    /// </summary>
+    public DateTime? CreatedAt { get; set; }
+}
+
+/// <summary>
+/// Data transfer object for changing password
+/// </summary>
+public class ChangePasswordDto
+{
+    /// <summary>
+    /// Gets or sets the new password
+    /// </summary>
+    public string NewPassword { get; set; } = string.Empty;
 }
 

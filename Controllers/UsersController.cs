@@ -70,8 +70,54 @@ public class UsersController : ControllerBase
             Id = user.Id,
             Username = user.Username,
             Email = user.Email,
-            FullName = user.FullName
+            FullName = user.FullName,
+            CreatedAt = user.CreatedAt
         });
+    }
+
+    /// <summary>
+    /// Gets all users
+    /// </summary>
+    /// <returns>List of users</returns>
+    [HttpGet]
+    [ProducesResponseType(typeof(List<UserDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<UserDto>>> GetUsers()
+    {
+        var users = await _context.Users
+            .OrderBy(u => u.Username)
+            .Select(u => new UserDto
+            {
+                Id = u.Id,
+                Username = u.Username,
+                Email = u.Email,
+                FullName = u.FullName,
+                CreatedAt = u.CreatedAt
+            })
+            .ToListAsync();
+
+        return Ok(users);
+    }
+
+    /// <summary>
+    /// Gets all users
+    /// </summary>
+    /// <returns>List of users</returns>
+    [HttpGet]
+    [ProducesResponseType(typeof(List<UserDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<UserDto>>> GetUsers()
+    {
+        var users = await _context.Users
+            .OrderBy(u => u.Username)
+            .Select(u => new UserDto
+            {
+                Id = u.Id,
+                Username = u.Username,
+                Email = u.Email,
+                FullName = u.FullName
+            })
+            .ToListAsync();
+
+        return Ok(users);
     }
 
     /// <summary>
@@ -93,8 +139,54 @@ public class UsersController : ControllerBase
             Id = user.Id,
             Username = user.Username,
             Email = user.Email,
-            FullName = user.FullName
+            FullName = user.FullName,
+            CreatedAt = user.CreatedAt
         });
+    }
+
+    /// <summary>
+    /// Changes a user's password
+    /// </summary>
+    /// <param name="id">User ID</param>
+    /// <param name="dto">Password change data</param>
+    /// <returns>Success response</returns>
+    [HttpPut("{id}/password")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> ChangePassword(int id, [FromBody] ChangePasswordDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.NewPassword) || dto.NewPassword.Length < 6)
+            return BadRequest(new { message = "Password must be at least 6 characters long" });
+
+        var user = await _context.Users.FindAsync(id);
+        if (user == null)
+            return NotFound();
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+        await _context.SaveChangesAsync();
+
+        return Ok(new { message = "Password changed successfully" });
+    }
+
+    /// <summary>
+    /// Deletes a user
+    /// </summary>
+    /// <param name="id">User ID</param>
+    /// <returns>Success response</returns>
+    [HttpDelete("{id}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> DeleteUser(int id)
+    {
+        var user = await _context.Users.FindAsync(id);
+        if (user == null)
+            return NotFound();
+
+        _context.Users.Remove(user);
+        await _context.SaveChangesAsync();
+
+        return Ok(new { message = "User deleted successfully" });
     }
 }
 
