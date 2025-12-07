@@ -70,3 +70,6 @@ artifacts/
 wwwroot/uploads/
 
 /Database/create_admin_user.sql
+/GITHUB_SECRETS.md
+/README.md
+/SQL_COMMANDS.md
