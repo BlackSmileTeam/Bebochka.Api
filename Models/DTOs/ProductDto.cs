@@ -163,6 +163,16 @@ public class UpdateProductDto
     public string? Color { get; set; }
     
     /// <summary>
+    /// Gets or sets the list of existing image paths to preserve
+    /// </summary>
+    public List<string>? ExistingImages { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the list of new product images as base64 strings
+    /// </summary>
+    public List<string>? Images { get; set; }
+    
+    /// <summary>
     /// Gets or sets the quantity of products in stock
     /// </summary>
     public int QuantityInStock { get; set; } = 1;
