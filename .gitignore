@@ -75,3 +75,4 @@ wwwroot/uploads/
 /SQL_COMMANDS.md
 /Utilities/HashGen.csx
 /DEPLOYMENT.md
+/Database/add_inventory_and_orders.sql
