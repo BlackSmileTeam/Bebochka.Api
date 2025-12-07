@@ -82,8 +82,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       docker_tag: ${{ steps.determine_tag.outputs.TAG }}
-      has_dockerhub: ${{ steps.check_dockerhub.outputs.has_dockerhub }}
-      docker_image: ${{ steps.check_dockerhub.outputs.DOCKER_IMAGE }}
     steps:
     - uses: actions/checkout@v4
       with:
@@ -107,66 +105,29 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Check Docker Hub credentials
-      id: check_dockerhub
-      run: |
-        if [ -n "$DOCKERHUB_USERNAME" ] && [ -n "$DOCKERHUB_TOKEN" ]; then
-          echo "has_dockerhub=true" >> $GITHUB_OUTPUT
-          echo "DOCKER_IMAGE=$DOCKERHUB_USERNAME/${{ env.IMAGE_NAME }}" >> $GITHUB_OUTPUT
-        else
-          echo "has_dockerhub=false" >> $GITHUB_OUTPUT
-        fi
-      env:
-        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Login to Docker Hub
-      if: steps.check_dockerhub.outputs.has_dockerhub == 'true'
+    - name: Login to Docker Registry
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Build and push Docker image to Docker Hub
-      if: steps.check_dockerhub.outputs.has_dockerhub == 'true'
+    - name: Build and push Docker image
       run: |
         docker buildx create --use
         docker buildx build \
           -f ${{ env.DOCKERFILE_PATH }} \
-          -t ${{ steps.check_dockerhub.outputs.DOCKER_IMAGE }}:${{ steps.determine_tag.outputs.TAG }} \
-          -t ${{ steps.check_dockerhub.outputs.DOCKER_IMAGE }}:latest \
+          -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.determine_tag.outputs.TAG }} \
+          -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest \
           --platform linux/amd64 \
           --push \
           --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
           --build-arg VERSION=${{ steps.determine_tag.outputs.TAG }} \
           .
-        echo "DOCKER_IMAGE=${{ steps.check_dockerhub.outputs.DOCKER_IMAGE }}" >> $GITHUB_ENV
-
-    - name: Build Docker image locally
-      if: steps.check_dockerhub.outputs.has_dockerhub != 'true'
-      run: |
-        docker buildx create --use
-        docker buildx build \
-          -f ${{ env.DOCKERFILE_PATH }} \
-          -t ${{ env.IMAGE_NAME }}:${{ steps.determine_tag.outputs.TAG }} \
-          -t ${{ env.IMAGE_NAME }}:latest \
-          --platform linux/amd64 \
-          --load \
-          --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
-          --build-arg VERSION=${{ steps.determine_tag.outputs.TAG }} \
-          .
-
-    - name: Save Docker image
-      if: steps.check_dockerhub.outputs.has_dockerhub != 'true'
-      run: |
-        docker save ${{ env.IMAGE_NAME }}:latest | gzip > ${{ env.IMAGE_NAME }}.tar.gz
 
   deploy:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-
     - name: Prepare deployment directory
       uses: appleboy/ssh-action@v1
       with:
@@ -179,17 +140,6 @@ jobs:
           mkdir -p ${{ env.DEPLOY_DIR }}/logs
           chmod 755 ${{ env.DEPLOY_DIR }}/uploads
 
-    - name: Copy Docker image to server
-      if: needs.build.outputs.has_dockerhub != 'true'
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ env.SSH_PORT }}
-        source: "${{ env.IMAGE_NAME }}.tar.gz"
-        target: "/tmp/"
-
     - name: Deploy application
       uses: appleboy/ssh-action@v1
       with:
@@ -197,30 +147,18 @@ jobs:
         username: ${{ secrets.SSH_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: ${{ env.SSH_PORT }}
-        envs: DB_CONNECTION_STRING,HAS_DOCKERHUB,DOCKER_IMAGE
+        envs: DB_CONNECTION_STRING
         script: |
           #!/bin/bash
           set -euo pipefail
 
-          # Determine image source
-          if [ "$HAS_DOCKERHUB" == "true" ]; then
-            echo "Pulling image from Docker Hub: $DOCKER_IMAGE:${{ needs.build.outputs.docker_tag }}"
-            docker pull $DOCKER_IMAGE:${{ needs.build.outputs.docker_tag }}
-            FINAL_IMAGE=$DOCKER_IMAGE:${{ needs.build.outputs.docker_tag }}
-          else
-            echo "Loading Docker image from file..."
-            docker load < /tmp/${{ env.IMAGE_NAME }}.tar.gz
-            rm /tmp/${{ env.IMAGE_NAME }}.tar.gz
-            FINAL_IMAGE=${{ env.IMAGE_NAME }}:${{ needs.build.outputs.docker_tag }}
-          fi
-
           # Stop existing container
-          echo "Stopping existing container..."
           docker stop ${{ env.IMAGE_NAME }} || true
           docker rm ${{ env.IMAGE_NAME }} || true
 
-          # Run new container
-          echo "Starting new container with image: $FINAL_IMAGE"
+          # Pull and run new container
+          docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.docker_tag }}
+          
           docker run -d \
             --name ${{ env.IMAGE_NAME }} \
             --restart unless-stopped \
@@ -229,17 +167,14 @@ jobs:
             -e ASPNETCORE_ENVIRONMENT=Production \
             -e ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING" \
             -e ASPNETCORE_URLS=http://+:{{ env.CONTAINER_PORT }} \
-            $FINAL_IMAGE
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.docker_tag }}
 
           # Clean up old images
-          echo "Cleaning up old Docker images..."
           docker image prune -f
 
           echo "=== Deployment successful ==="
       env:
         DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
-        HAS_DOCKERHUB: ${{ needs.build.outputs.has_dockerhub }}
-        DOCKER_IMAGE: ${{ needs.build.outputs.docker_image }}
 
   post-deploy-test:
     needs: [deploy, test-connection]
