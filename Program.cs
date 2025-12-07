@@ -195,10 +195,12 @@ var app = builder.Build();
 
 // Configure the HTTP request pipeline
 // Add request logging middleware - должно быть ПЕРЕД CORS
+// ВАЖНО: Для multipart запросов НЕ читаем body, чтобы не блокировать поток
 app.Use(async (context, next) =>
 {
     var startTime = DateTime.UtcNow;
     var requestId = Guid.NewGuid().ToString("N")[..8];
+    var isMultipart = context.Request.ContentType?.Contains("multipart") == true;
     
     try
     {
@@ -213,35 +215,49 @@ app.Use(async (context, next) =>
         Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] User-Agent: {context.Request.Headers["User-Agent"]}");
         Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] HasFormContentType: {context.Request.HasFormContentType}");
         
-        // Логируем все заголовки для multipart запросов
-        if (context.Request.ContentType?.Contains("multipart") == true)
+        if (isMultipart)
         {
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Multipart boundary detected");
-            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Form.Files.Count: {context.Request.Form?.Files?.Count ?? 0}");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Multipart request detected - skipping body reading to avoid blocking");
         }
         
-        var originalBodyStream = context.Response.Body;
-        using var responseBody = new MemoryStream();
-        context.Response.Body = responseBody;
-        
-        await next();
-        
-        var endTime = DateTime.UtcNow;
-        var duration = (endTime - startTime).TotalMilliseconds;
-        
-        responseBody.Seek(0, SeekOrigin.Begin);
-        var responseBodyText = await new StreamReader(responseBody).ReadToEndAsync();
-        responseBody.Seek(0, SeekOrigin.Begin);
-        await responseBody.CopyToAsync(originalBodyStream);
-        
-        Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Status Code: {context.Response.StatusCode}");
-        Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Duration: {duration:F2} ms");
-        Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Response Size: {responseBodyText.Length} bytes");
-        if (responseBodyText.Length > 0 && responseBodyText.Length < 1000)
+        // Для multipart запросов НЕ перехватываем response body, чтобы не блокировать
+        if (isMultipart)
         {
-            Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Response Body: {responseBodyText}");
+            Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Passing multipart request directly to next middleware");
+            await next();
+            
+            var endTime = DateTime.UtcNow;
+            var duration = (endTime - startTime).TotalMilliseconds;
+            Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Status Code: {context.Response.StatusCode}");
+            Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Duration: {duration:F2} ms");
+            Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] ========== END REQUEST ==========");
         }
-        Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] ========== END REQUEST ==========");
+        else
+        {
+            // Для обычных запросов читаем response body для логирования
+            var originalBodyStream = context.Response.Body;
+            using var responseBody = new MemoryStream();
+            context.Response.Body = responseBody;
+            
+            await next();
+            
+            var endTime = DateTime.UtcNow;
+            var duration = (endTime - startTime).TotalMilliseconds;
+            
+            responseBody.Seek(0, SeekOrigin.Begin);
+            var responseBodyText = await new StreamReader(responseBody).ReadToEndAsync();
+            responseBody.Seek(0, SeekOrigin.Begin);
+            await responseBody.CopyToAsync(originalBodyStream);
+            
+            Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Status Code: {context.Response.StatusCode}");
+            Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Duration: {duration:F2} ms");
+            Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Response Size: {responseBodyText.Length} bytes");
+            if (responseBodyText.Length > 0 && responseBodyText.Length < 1000)
+            {
+                Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] Response Body: {responseBodyText}");
+            }
+            Console.WriteLine($"[{endTime:yyyy-MM-dd HH:mm:ss.fff}] [{requestId}] ========== END REQUEST ==========");
+        }
     }
     catch (Exception ex)
     {
