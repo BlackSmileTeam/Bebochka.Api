@@ -10,8 +10,9 @@ public interface IProductService
     /// <summary>
     /// Gets all products from the database
     /// </summary>
+    /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
     /// <returns>List of all products</returns>
-    Task<List<ProductDto>> GetAllProductsAsync();
+    Task<List<ProductDto>> GetAllProductsAsync(string? sessionId = null);
 
     /// <summary>
     /// Gets a product by its unique identifier

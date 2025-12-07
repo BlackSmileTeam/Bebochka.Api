@@ -34,9 +34,9 @@ public class ProductsController : ControllerBase
     /// <response code="200">Returns the list of products</response>
     [HttpGet]
     [ProducesResponseType(typeof(List<ProductDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<List<ProductDto>>> GetAllProducts()
+    public async Task<ActionResult<List<ProductDto>>> GetAllProducts([FromQuery] string? sessionId = null)
     {
-        var products = await _productService.GetAllProductsAsync();
+        var products = await _productService.GetAllProductsAsync(sessionId);
         return Ok(products);
     }
 

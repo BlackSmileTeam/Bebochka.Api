@@ -61,6 +61,11 @@ public class ProductDto
     public int QuantityInStock { get; set; }
     
     /// <summary>
+    /// Gets or sets the available quantity (QuantityInStock minus reserved in other carts)
+    /// </summary>
+    public int AvailableQuantity { get; set; }
+    
+    /// <summary>
     /// Gets or sets the gender target (мальчик, девочка, унисекс)
     /// </summary>
     public string? Gender { get; set; }

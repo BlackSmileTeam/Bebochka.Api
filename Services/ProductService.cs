@@ -24,14 +24,35 @@ public class ProductService : IProductService
     /// <summary>
     /// Gets all products from the database, ordered by creation date (newest first)
     /// </summary>
+    /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
     /// <returns>List of all products</returns>
-    public async Task<List<ProductDto>> GetAllProductsAsync()
+    public async Task<List<ProductDto>> GetAllProductsAsync(string? sessionId = null)
     {
         var products = await _context.Products
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 
-        return products.Select(MapToDto).ToList();
+        // Вычисляем зарезервированное количество для каждого товара
+        var productIds = products.Select(p => p.Id).ToList();
+        var expirationTime = DateTime.UtcNow.AddMinutes(-30);
+        var reservedItems = await _context.CartItems
+            .Where(c => productIds.Contains(c.ProductId) && 
+                       (sessionId == null || c.SessionId != sessionId) &&
+                       c.UpdatedAt > expirationTime) // Только активные резервы
+            .GroupBy(c => c.ProductId)
+            .Select(g => new { ProductId = g.Key, Reserved = g.Sum(c => c.Quantity) })
+            .ToListAsync();
+        
+        var reservedQuantities = reservedItems.ToDictionary(x => x.ProductId, x => x.Reserved);
+
+        return products.Select(p => 
+        {
+            var dto = MapToDto(p);
+            // Вычисляем доступное количество (общее - зарезервированное)
+            var reserved = reservedQuantities.GetValueOrDefault(p.Id, 0);
+            dto.AvailableQuantity = Math.Max(0, p.QuantityInStock - reserved);
+            return dto;
+        }).ToList();
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
-using System.Net;
-using System.Net.Mail;
+using MailKit.Net.Smtp;
+using MailKit.Security;
+using MimeKit;
 using Bebochka.Api.Models;
 
 namespace Bebochka.Api.Services;
@@ -32,30 +33,46 @@ public class EmailService : IEmailService
             if (string.IsNullOrEmpty(smtpUsername) || string.IsNullOrEmpty(smtpPassword))
             {
                 _logger.LogWarning("Email credentials not configured. Skipping email send.");
+                _logger.LogWarning("Please configure Email:Username and Email:Password in appsettings.json");
                 return;
             }
 
-            using var client = new SmtpClient(smtpHost, smtpPort)
+            if (string.IsNullOrEmpty(fromEmail))
             {
-                EnableSsl = true,
-                Credentials = new NetworkCredential(smtpUsername, smtpPassword)
-            };
+                _logger.LogWarning("Email:FromEmail not configured. Using Username as from email.");
+                fromEmail = smtpUsername;
+            }
 
-            var subject = $"Новый заказ #{order.OrderNumber}";
-            var body = BuildOrderEmailBody(order);
+            _logger.LogInformation($"Attempting to send order email to {toEmail} from {fromEmail} via {smtpHost}:{smtpPort}");
 
-            using var message = new MailMessage(fromEmail, toEmail, subject, body)
+            var message = new MimeMessage();
+            message.From.Add(new MailboxAddress("Bebochka Store", fromEmail));
+            message.To.Add(new MailboxAddress("Store Owner", toEmail));
+            message.Subject = $"Новый заказ #{order.OrderNumber}";
+
+            var bodyBuilder = new BodyBuilder
             {
-                IsBodyHtml = true
+                HtmlBody = BuildOrderEmailBody(order)
             };
+            message.Body = bodyBuilder.ToMessageBody();
 
-            await client.SendMailAsync(message);
-            _logger.LogInformation($"Order notification email sent for order {order.OrderNumber}");
+            using var client = new SmtpClient();
+            await client.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
+            await client.AuthenticateAsync(smtpUsername, smtpPassword);
+            await client.SendAsync(message);
+            await client.DisconnectAsync(true);
+
+            _logger.LogInformation($"Order notification email sent successfully for order {order.OrderNumber}");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, $"Failed to send order notification email for order {order.OrderNumber}");
-            throw;
+            _logger.LogError($"Error details: {ex.Message}");
+            if (ex.InnerException != null)
+            {
+                _logger.LogError($"Inner exception: {ex.InnerException.Message}");
+            }
+            // Не пробрасываем исключение дальше, чтобы не прерывать создание заказа
         }
     }
 
