@@ -12,6 +12,7 @@ env:
   HOST_PORT: 44315
   DEPLOY_DIR: /opt/bebochka
   IMAGE_NAME: bebochka-backend
+  DOCKER_REGISTRY: docker.io
 
 jobs:
   validate:
@@ -104,20 +105,44 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Docker image
+    - name: Login to Docker Hub (if credentials available)
+      uses: docker/login-action@v3
+      if: ${{ secrets.DOCKERHUB_USERNAME != '' && secrets.DOCKERHUB_TOKEN != '' }}
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and optionally push Docker image
       run: |
         docker buildx create --use
-        docker buildx build \
-          -f ${{ env.DOCKERFILE_PATH }} \
-          -t ${{ env.IMAGE_NAME }}:${{ steps.determine_tag.outputs.TAG }} \
-          -t ${{ env.IMAGE_NAME }}:latest \
-          --platform linux/amd64 \
-          --load \
-          --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
-          --build-arg VERSION=${{ steps.determine_tag.outputs.TAG }} \
-          .
+        if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+          echo "Building and pushing to Docker Hub..."
+          DOCKER_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+          docker buildx build \
+            -f ${{ env.DOCKERFILE_PATH }} \
+            -t $DOCKER_IMAGE:${{ steps.determine_tag.outputs.TAG }} \
+            -t $DOCKER_IMAGE:latest \
+            --platform linux/amd64 \
+            --push \
+            --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+            --build-arg VERSION=${{ steps.determine_tag.outputs.TAG }} \
+            .
+          echo "IMAGE_NAME=$DOCKER_IMAGE" >> $GITHUB_ENV
+        else
+          echo "Building Docker image locally..."
+          docker buildx build \
+            -f ${{ env.DOCKERFILE_PATH }} \
+            -t ${{ env.IMAGE_NAME }}:${{ steps.determine_tag.outputs.TAG }} \
+            -t ${{ env.IMAGE_NAME }}:latest \
+            --platform linux/amd64 \
+            --load \
+            --build-arg BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ') \
+            --build-arg VERSION=${{ steps.determine_tag.outputs.TAG }} \
+            .
+        fi
 
-    - name: Save Docker image
+    - name: Save Docker image (if not pushed to registry)
+      if: ${{ secrets.DOCKERHUB_USERNAME == '' || secrets.DOCKERHUB_TOKEN == '' }}
       run: |
         docker save ${{ env.IMAGE_NAME }}:latest | gzip > ${{ env.IMAGE_NAME }}.tar.gz
 
@@ -139,7 +164,8 @@ jobs:
           mkdir -p ${{ env.DEPLOY_DIR }}/logs
           chmod 755 ${{ env.DEPLOY_DIR }}/uploads
 
-    - name: Copy Docker image to server
+    - name: Copy Docker image to server (if not using registry)
+      if: ${{ secrets.DOCKERHUB_USERNAME == '' || secrets.DOCKERHUB_TOKEN == '' }}
       uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.SSH_HOST }}
@@ -161,10 +187,18 @@ jobs:
           #!/bin/bash
           set -euo pipefail
 
-          # Load Docker image
-          echo "Loading Docker image..."
-          docker load < /tmp/${{ env.IMAGE_NAME }}.tar.gz
-          rm /tmp/${{ env.IMAGE_NAME }}.tar.gz
+          # Determine image source
+          if [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ] && [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ]; then
+            DOCKER_IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}"
+            echo "Pulling image from Docker Hub: $DOCKER_IMAGE:${{ needs.build.outputs.docker_tag }}"
+            docker pull $DOCKER_IMAGE:${{ needs.build.outputs.docker_tag }}
+            FINAL_IMAGE=$DOCKER_IMAGE:${{ needs.build.outputs.docker_tag }}
+          else
+            echo "Loading Docker image from file..."
+            docker load < /tmp/${{ env.IMAGE_NAME }}.tar.gz
+            rm /tmp/${{ env.IMAGE_NAME }}.tar.gz
+            FINAL_IMAGE=${{ env.IMAGE_NAME }}:${{ needs.build.outputs.docker_tag }}
+          fi
 
           # Stop existing container
           echo "Stopping existing container..."
@@ -172,7 +206,7 @@ jobs:
           docker rm ${{ env.IMAGE_NAME }} || true
 
           # Run new container
-          echo "Starting new container..."
+          echo "Starting new container with image: $FINAL_IMAGE"
           docker run -d \
             --name ${{ env.IMAGE_NAME }} \
             --restart unless-stopped \
@@ -181,7 +215,7 @@ jobs:
             -e ASPNETCORE_ENVIRONMENT=Production \
             -e ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING" \
             -e ASPNETCORE_URLS=http://+:{{ env.CONTAINER_PORT }} \
-            ${{ env.IMAGE_NAME }}:${{ needs.build.outputs.docker_tag }}
+            $FINAL_IMAGE
 
           # Clean up old images
           echo "Cleaning up old Docker images..."
