@@ -4,10 +4,9 @@ EXPOSE 44315
 
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
-COPY ["Bebochka.Api/Bebochka.Api.csproj", "Bebochka.Api/"]
-RUN dotnet restore "Bebochka.Api/Bebochka.Api.csproj"
+COPY ["Bebochka.Api.csproj", "./"]
+RUN dotnet restore "Bebochka.Api.csproj"
 COPY . .
-WORKDIR "/src/Bebochka.Api"
 RUN dotnet build "Bebochka.Api.csproj" -c Release -o /app/build
 
 FROM build AS publish

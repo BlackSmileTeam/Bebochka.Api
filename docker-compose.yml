@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bebochka-backend
+    ports:
+      - "44315:44315"
+    environment:
+      - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
+      - ASPNETCORE_URLS=http://+:44315
+    volumes:
+      - ./wwwroot/uploads:/app/wwwroot/uploads
+    restart: unless-stopped
+
