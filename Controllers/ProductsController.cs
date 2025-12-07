@@ -102,9 +102,38 @@ public class ProductsController : ControllerBase
             if (dto.Images != null && dto.Images.Any())
             {
                 var uploadsFolder = Path.Combine(_environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
-                if (!Directory.Exists(uploadsFolder))
+                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Uploads folder path: {uploadsFolder}");
+                
+                try
                 {
-                    Directory.CreateDirectory(uploadsFolder);
+                    if (!Directory.Exists(uploadsFolder))
+                    {
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Creating uploads directory...");
+                        Directory.CreateDirectory(uploadsFolder);
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Directory created successfully");
+                    }
+                    
+                    // Проверяем права на запись
+                    var testFile = Path.Combine(uploadsFolder, ".write-test");
+                    try
+                    {
+                        await System.IO.File.WriteAllTextAsync(testFile, "test");
+                        System.IO.File.Delete(testFile);
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Write permissions OK");
+                    }
+                    catch (Exception writeEx)
+                    {
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR: Cannot write to uploads folder: {writeEx.Message}");
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Current user: {Environment.UserName}");
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Directory permissions check failed");
+                        throw new UnauthorizedAccessException($"Cannot write to uploads folder: {writeEx.Message}");
+                    }
+                }
+                catch (Exception dirEx)
+                {
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR creating/accessing uploads folder: {dirEx.Message}");
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Exception type: {dirEx.GetType().Name}");
+                    throw;
                 }
                 
                 foreach (var base64Image in dto.Images)

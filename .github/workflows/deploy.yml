@@ -148,7 +148,8 @@ jobs:
         script: |
           mkdir -p ${{ env.DEPLOY_DIR }}/uploads
           mkdir -p ${{ env.DEPLOY_DIR }}/logs
-          chmod 755 ${{ env.DEPLOY_DIR }}/uploads
+          chmod 777 ${{ env.DEPLOY_DIR }}/uploads
+          echo "Uploads directory created with permissions: $(ls -ld ${{ env.DEPLOY_DIR }}/uploads)"
 
     - name: Copy Docker image to server
       uses: appleboy/scp-action@v0.1.7
@@ -181,6 +182,9 @@ jobs:
           docker stop $IMAGE_NAME || true
           docker rm $IMAGE_NAME || true
 
+          # Ensure uploads directory has correct permissions before mounting
+          chmod -R 777 $DEPLOY_DIR/uploads || true
+          
           # Run new container
           docker run -d \
             --name $IMAGE_NAME \
@@ -191,6 +195,10 @@ jobs:
             -e ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING" \
             -e ASPNETCORE_URLS=http://+:$CONTAINER_PORT \
             $IMAGE_NAME:latest
+          
+          # Verify permissions after container start
+          echo "Checking uploads directory permissions:"
+          docker exec $IMAGE_NAME ls -ld /app/wwwroot/uploads || echo "Cannot check permissions inside container"
 
           # Clean up old images
           docker image prune -f
