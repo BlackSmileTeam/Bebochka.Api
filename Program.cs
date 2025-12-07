@@ -16,6 +16,9 @@ var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.ConfigureKestrel(options =>
 {
     options.Limits.MaxRequestBodySize = 10 * 1024 * 1024; // 10MB
+    // Отключаем проверку скорости передачи данных
+    options.Limits.MinRequestBodyDataRate = null;
+    options.Limits.MinResponseDataRate = null;
 });
 
 // Configure form options for file uploads (max 10MB)
@@ -27,9 +30,6 @@ builder.Services.Configure<FormOptions>(options =>
     options.MultipartBoundaryLengthLimit = int.MaxValue;
     options.KeyLengthLimit = int.MaxValue;
     options.ValueCountLimit = int.MaxValue;
-    options.BufferBody = true; // Включаем буферизацию для правильного чтения формы
-    options.BufferBodyLengthLimit = 10 * 1024 * 1024; // 10MB
-    options.MemoryBufferThreshold = 2 * 1024 * 1024; // 2MB - буферизация в памяти до 2MB
 });
 
 // Add services to the container
@@ -188,36 +188,6 @@ var app = builder.Build();
 
 // Configure the HTTP request pipeline
 
-// Enable buffering for multipart requests BEFORE model binding
-app.Use(async (context, next) =>
-{
-    if (context.Request.Method == "POST" && 
-        context.Request.Path.StartsWithSegments("/api/products") &&
-        context.Request.ContentType?.Contains("multipart") == true)
-    {
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Enabling buffering for multipart request");
-        context.Request.EnableBuffering();
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Body.CanSeek after EnableBuffering: {context.Request.Body.CanSeek}");
-    }
-    await next();
-});
-
-// Simple request logging
-app.Use(async (context, next) =>
-{
-    if (context.Request.Method == "POST" && context.Request.Path.StartsWithSegments("/api/products"))
-    {
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] POST /api/products - ContentType: {context.Request.ContentType}, ContentLength: {context.Request.ContentLength}");
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] HasFormContentType: {context.Request.HasFormContentType}");
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] Body.CanSeek: {context.Request.Body.CanSeek}");
-    }
-    await next();
-    
-    if (context.Request.Method == "POST" && context.Request.Path.StartsWithSegments("/api/products"))
-    {
-        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] POST /api/products COMPLETED - Status: {context.Response.StatusCode}");
-    }
-});
 
 // CORS must be very early in the pipeline, before UseRouting
 app.UseCors("AllowReactApp");

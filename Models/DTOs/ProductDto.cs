@@ -90,6 +90,11 @@ public class CreateProductDto
     /// Gets or sets the product color
     /// </summary>
     public string? Color { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the list of base64 encoded images
+    /// </summary>
+    public List<string>? Images { get; set; }
 }
 
 /// <summary>

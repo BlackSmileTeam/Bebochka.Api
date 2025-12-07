@@ -84,102 +84,66 @@ public class ProductsController : ControllerBase
     /// </remarks>
     [HttpPost]
     [Authorize]
-    [Consumes("multipart/form-data")]
     [ProducesResponseType(typeof(ProductDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    [RequestFormLimits(MultipartBodyLengthLimit = 10 * 1024 * 1024)] // 10MB
-    [DisableRequestSizeLimit]
-    public async Task<ActionResult<ProductDto>> CreateProduct()
+    public async Task<ActionResult<ProductDto>> CreateProduct([FromBody] CreateProductDto dto)
     {
-        var startTime = DateTime.UtcNow;
-        Console.WriteLine($"[{startTime:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] CreateProduct STARTED");
-        
         try
         {
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Reading form manually...");
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] HasFormContentType: {Request.HasFormContentType}");
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Body.CanSeek: {Request.Body.CanSeek}");
-            
-            // Включаем буферизацию, если еще не включена
-            if (!Request.Body.CanSeek)
+            if (dto == null || string.IsNullOrEmpty(dto.Name))
             {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Enabling buffering...");
-                Request.EnableBuffering();
-            }
-            
-            // Читаем форму вручную
-            var form = await Request.ReadFormAsync();
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Form read successfully. Keys: {string.Join(", ", form.Keys)}");
-            
-            // Создаем DTO из формы
-            var dto = new CreateProductDto
-            {
-                Name = form["name"].ToString(),
-                Brand = form["brand"].ToString(),
-                Description = form["description"].ToString(),
-                Price = decimal.TryParse(form["price"].ToString(), out var price) ? price : 0,
-                Size = form["size"].ToString(),
-                Color = form["color"].ToString()
-            };
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] DTO created - Name: {dto.Name}");
-            
-            if (string.IsNullOrEmpty(dto.Name))
-            {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] ERROR: Product name is required");
                 return BadRequest(new { message = "Product name is required" });
             }
             
-            // Получаем файлы
-            var files = form.Files.ToList();
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Total files to process: {files.Count}");
-            
             var imagePaths = new List<string>();
-
-            if (files != null && files.Any())
+            
+            // Обрабатываем base64 изображения
+            if (dto.Images != null && dto.Images.Any())
             {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Processing {files.Count} files...");
                 var uploadsFolder = Path.Combine(_environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Uploads folder: {uploadsFolder}");
-                
                 if (!Directory.Exists(uploadsFolder))
                 {
                     Directory.CreateDirectory(uploadsFolder);
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Created uploads folder");
                 }
-
-                foreach (var image in files)
+                
+                foreach (var base64Image in dto.Images)
                 {
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Processing file: {image.FileName}, Size: {image.Length}");
-                    if (image.Length > 0)
+                    if (string.IsNullOrEmpty(base64Image)) continue;
+                    
+                    try
                     {
-                        var fileName = $"{Guid.NewGuid()}{Path.GetExtension(image.FileName)}";
-                        var filePath = Path.Combine(uploadsFolder, fileName);
-                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Saving to: {filePath}");
-
-                        using (var stream = new FileStream(filePath, FileMode.Create))
+                        // Убираем префикс data:image/...;base64, если есть
+                        var base64Data = base64Image.Contains(",") 
+                            ? base64Image.Split(',')[1] 
+                            : base64Image;
+                        
+                        var imageBytes = Convert.FromBase64String(base64Data);
+                        
+                        // Определяем расширение по содержимому
+                        var extension = ".jpg";
+                        if (imageBytes.Length > 2)
                         {
-                            await image.CopyToAsync(stream);
+                            if (imageBytes[0] == 0x89 && imageBytes[1] == 0x50) extension = ".png";
+                            else if (imageBytes[0] == 0x47 && imageBytes[1] == 0x49) extension = ".gif";
+                            else if (imageBytes[0] == 0x52 && imageBytes[1] == 0x49) extension = ".webp";
                         }
-
+                        
+                        var fileName = $"{Guid.NewGuid()}{extension}";
+                        var filePath = Path.Combine(uploadsFolder, fileName);
+                        
+                        await System.IO.File.WriteAllBytesAsync(filePath, imageBytes);
                         imagePaths.Add($"/uploads/{fileName}");
-                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] File saved: {fileName}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Error processing image: {ex.Message}");
+                        // Пропускаем некорректное изображение
                     }
                 }
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] All files processed. Total: {imagePaths.Count}");
             }
-            else
-            {
-                Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] No files to process");
-            }
-
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Creating product in database...");
+            
             var product = await _productService.CreateProductAsync(dto, imagePaths);
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Product created with ID: {product.Id}");
-            
-            var duration = (DateTime.UtcNow - startTime).TotalMilliseconds;
-            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] CreateProduct COMPLETED in {duration:F2} ms");
-            
             return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
         }
         catch (Exception ex)
