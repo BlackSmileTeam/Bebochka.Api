@@ -24,7 +24,11 @@ public class EmailService : IEmailService
         try
         {
             var smtpHost = _configuration["Email:SmtpHost"] ?? "smtp.gmail.com";
-            var smtpPort = int.Parse(_configuration["Email:SmtpPort"] ?? "587");
+            var smtpPortStr = _configuration["Email:SmtpPort"] ?? "587";
+            if (!int.TryParse(smtpPortStr, out var smtpPort))
+            {
+                smtpPort = 587;
+            }
             var smtpUsername = _configuration["Email:Username"] ?? "";
             var smtpPassword = _configuration["Email:Password"] ?? "";
             var fromEmail = _configuration["Email:FromEmail"] ?? smtpUsername;
@@ -34,6 +38,15 @@ public class EmailService : IEmailService
             {
                 _logger.LogWarning("Email credentials not configured. Skipping email send.");
                 _logger.LogWarning("Please configure Email:Username and Email:Password in appsettings.json");
+                _logger.LogWarning("Example configuration:");
+                _logger.LogWarning("  \"Email\": {");
+                _logger.LogWarning("    \"SmtpHost\": \"smtp.gmail.com\",");
+                _logger.LogWarning("    \"SmtpPort\": \"587\",");
+                _logger.LogWarning("    \"Username\": \"your-email@gmail.com\",");
+                _logger.LogWarning("    \"Password\": \"your-app-password\",");
+                _logger.LogWarning("    \"FromEmail\": \"your-email@gmail.com\",");
+                _logger.LogWarning("    \"ToEmail\": \"sekisov@gmail.com\"");
+                _logger.LogWarning("  }");
                 return;
             }
 
@@ -57,12 +70,37 @@ public class EmailService : IEmailService
             message.Body = bodyBuilder.ToMessageBody();
 
             using var client = new SmtpClient();
-            await client.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
-            await client.AuthenticateAsync(smtpUsername, smtpPassword);
-            await client.SendAsync(message);
-            await client.DisconnectAsync(true);
-
-            _logger.LogInformation($"Order notification email sent successfully for order {order.OrderNumber}");
+            try
+            {
+                _logger.LogInformation($"Connecting to SMTP server {smtpHost}:{smtpPort}...");
+                await client.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
+                _logger.LogInformation("SMTP connection established. Authenticating...");
+                
+                await client.AuthenticateAsync(smtpUsername, smtpPassword);
+                _logger.LogInformation("SMTP authentication successful. Sending email...");
+                
+                await client.SendAsync(message);
+                _logger.LogInformation($"Order notification email sent successfully for order {order.OrderNumber}");
+            }
+            finally
+            {
+                if (client.IsConnected)
+                {
+                    await client.DisconnectAsync(true);
+                    _logger.LogInformation("SMTP connection closed.");
+                }
+            }
+        }
+        catch (MailKit.Security.AuthenticationException ex)
+        {
+            _logger.LogError(ex, $"SMTP authentication failed for order {order.OrderNumber}");
+            _logger.LogError("Please check your Email:Username and Email:Password in appsettings.json");
+            _logger.LogError("For Gmail, you need to use an App Password, not your regular password.");
+        }
+        catch (System.Net.Sockets.SocketException ex)
+        {
+            _logger.LogError(ex, $"Failed to connect to SMTP server for order {order.OrderNumber}");
+            _logger.LogError($"Check your Email:SmtpHost and Email:SmtpPort settings. Error: {ex.Message}");
         }
         catch (Exception ex)
         {
