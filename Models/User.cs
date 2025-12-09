@@ -49,5 +49,10 @@ public class User
     /// Gets or sets the date and time when the user last logged in
     /// </summary>
     public DateTime? LastLoginAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets the Telegram User ID for linking with Telegram bot
+    /// </summary>
+    public long? TelegramUserId { get; set; }
 }
 

@@ -84,3 +84,14 @@ public class ChangePasswordDto
     public string NewPassword { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Data transfer object for linking Telegram User ID
+/// </summary>
+public class LinkTelegramUserIdDto
+{
+    /// <summary>
+    /// Gets or sets the Telegram User ID
+    /// </summary>
+    public long TelegramUserId { get; set; }
+}
+

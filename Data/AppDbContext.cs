@@ -69,7 +69,10 @@ public class AppDbContext : DbContext
             entity.Property(e => e.PasswordHash).IsRequired().HasMaxLength(255);
             entity.Property(e => e.Email).HasMaxLength(100);
             entity.Property(e => e.FullName).HasMaxLength(100);
+            entity.Property(e => e.TelegramUserId);
+            entity.Property(e => e.IsAdmin).HasDefaultValue(false);
             entity.HasIndex(e => e.Username).IsUnique();
+            entity.HasIndex(e => e.TelegramUserId).IsUnique();
         });
 
         modelBuilder.Entity<CartItem>(entity =>

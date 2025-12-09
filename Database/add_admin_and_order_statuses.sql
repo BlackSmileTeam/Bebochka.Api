@@ -94,10 +94,32 @@ DEALLOCATE PREPARE stmt;
 -- 6. Создаем индекс для быстрого поиска заказов по статусу и пользователю
 CREATE INDEX IF NOT EXISTS idx_orders_status_userid ON Orders(Status, UserId);
 
--- 7. Пример: Назначить пользователя с ID=1 администратором (раскомментируйте при необходимости)
+-- 7. Добавляем поле TelegramUserId в таблицу Users для связи с Telegram ботом
+SET @col_exists = (
+    SELECT COUNT(*) 
+    FROM INFORMATION_SCHEMA.COLUMNS 
+    WHERE TABLE_SCHEMA = 'bebochka' 
+    AND TABLE_NAME = 'Users' 
+    AND COLUMN_NAME = 'TelegramUserId'
+);
+
+SET @sql = IF(@col_exists = 0,
+    'ALTER TABLE Users ADD COLUMN TelegramUserId BIGINT NULL COMMENT ''Telegram User ID для связи с ботом'' AFTER Id, ADD INDEX idx_users_telegram_userid (TelegramUserId)',
+    'SELECT ''Column TelegramUserId already exists'' AS message'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- 8. Пример: Назначить пользователя с ID=1 администратором (раскомментируйте при необходимости)
 -- UPDATE Users SET IsAdmin = 1 WHERE Id = 1;
 
+-- 9. Пример: Привязать Telegram User ID к пользователю (раскомментируйте при необходимости)
+-- UPDATE Users SET TelegramUserId = YOUR_TELEGRAM_USER_ID WHERE Id = USER_ID_IN_DB;
+-- Например: UPDATE Users SET TelegramUserId = 123456789 WHERE Id = 1;
+
 SELECT 'Database schema updated successfully!' AS message;
-SELECT 'Added columns: Users.IsAdmin, Orders.UserId, Orders.CancelledAt, Orders.CancellationReason' AS changes;
+SELECT 'Added columns: Users.IsAdmin, Users.TelegramUserId, Orders.UserId, Orders.CancelledAt, Orders.CancellationReason' AS changes;
 SELECT 'Updated order statuses to new format' AS status_update;
 

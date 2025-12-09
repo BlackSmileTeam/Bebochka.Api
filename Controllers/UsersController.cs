@@ -145,6 +145,40 @@ public class UsersController : ControllerBase
     }
 
     /// <summary>
+    /// Links a Telegram User ID to an existing user
+    /// </summary>
+    /// <param name="id">User ID</param>
+    /// <param name="telegramUserId">Telegram User ID</param>
+    /// <returns>Success response</returns>
+    /// <response code="200">Telegram User ID linked successfully</response>
+    /// <response code="400">Telegram User ID already linked to another user</response>
+    /// <response code="404">User not found</response>
+    [HttpPut("{id}/telegram")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> LinkTelegramUserId(int id, [FromBody] LinkTelegramUserIdDto dto)
+    {
+        var user = await _context.Users.FindAsync(id);
+        if (user == null)
+            return NotFound(new { message = "User not found" });
+
+        // Проверяем, не привязан ли уже этот Telegram User ID к другому пользователю
+        var existingUser = await _context.Users
+            .FirstOrDefaultAsync(u => u.TelegramUserId == dto.TelegramUserId && u.Id != id);
+
+        if (existingUser != null)
+        {
+            return BadRequest(new { message = $"Telegram User ID {dto.TelegramUserId} is already linked to user {existingUser.Username}" });
+        }
+
+        user.TelegramUserId = dto.TelegramUserId;
+        await _context.SaveChangesAsync();
+
+        return Ok(new { message = $"Telegram User ID {dto.TelegramUserId} linked to user {user.Username} successfully" });
+    }
+
+    /// <summary>
     /// Changes a user's password
     /// </summary>
     /// <param name="id">User ID</param>
