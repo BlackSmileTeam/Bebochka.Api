@@ -111,13 +111,22 @@ public class UsersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<bool>> IsAdmin(long telegramUserId)
     {
-        var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.TelegramUserId == telegramUserId);
+        try
+        {
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.TelegramUserId == telegramUserId);
 
-        if (user == null)
-            return NotFound(false);
+            // Если пользователь не найден, возвращаем false (не админ)
+            if (user == null)
+                return Ok(false);
 
-        return Ok(user.IsAdmin);
+            return Ok(user.IsAdmin);
+        }
+        catch (Exception ex)
+        {
+            // Логируем ошибку и возвращаем false
+            return Ok(false);
+        }
     }
 
     /// <summary>
