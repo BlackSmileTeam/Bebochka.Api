@@ -14,10 +14,12 @@ public class OrderDto
     public string? DeliveryMethod { get; set; }
     public string? Comment { get; set; }
     public decimal TotalAmount { get; set; }
-    public string Status { get; set; } = "pending";
+    public string Status { get; set; } = "В сборке";
     public List<OrderItemDto> OrderItems { get; set; } = new();
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    public DateTime? CancelledAt { get; set; }
+    public string? CancellationReason { get; set; }
 }
 
 /// <summary>
@@ -38,6 +40,7 @@ public class OrderItemDto
 public class CreateOrderDto
 {
     public string SessionId { get; set; } = string.Empty;
+    public int? UserId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
     public string CustomerPhone { get; set; } = string.Empty;
     public string? CustomerEmail { get; set; }

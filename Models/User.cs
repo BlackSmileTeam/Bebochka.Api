@@ -36,6 +36,11 @@ public class User
     public bool IsActive { get; set; } = true;
     
     /// <summary>
+    /// Gets or sets whether the user is an administrator
+    /// </summary>
+    public bool IsAdmin { get; set; } = false;
+    
+    /// <summary>
     /// Gets or sets the date and time when the user was created
     /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

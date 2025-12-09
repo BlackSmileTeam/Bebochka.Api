@@ -18,8 +18,9 @@ public interface IProductService
     /// Gets a product by its unique identifier
     /// </summary>
     /// <param name="id">Product identifier</param>
+    /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
     /// <returns>Product information or null if not found</returns>
-    Task<ProductDto?> GetProductByIdAsync(int id);
+    Task<ProductDto?> GetProductByIdAsync(int id, string? sessionId = null);
 
     /// <summary>
     /// Creates a new product

@@ -44,15 +44,16 @@ public class ProductsController : ControllerBase
     /// Gets a product by its unique identifier
     /// </summary>
     /// <param name="id">Product identifier</param>
+    /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
     /// <returns>Product information</returns>
     /// <response code="200">Returns the requested product</response>
     /// <response code="404">Product not found</response>
     [HttpGet("{id}")]
     [ProducesResponseType(typeof(ProductDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<ProductDto>> GetProduct(int id)
+    public async Task<ActionResult<ProductDto>> GetProduct(int id, [FromQuery] string? sessionId = null)
     {
-        var product = await _productService.GetProductByIdAsync(id);
+        var product = await _productService.GetProductByIdAsync(id, sessionId);
         if (product == null)
             return NotFound();
 

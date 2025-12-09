@@ -11,6 +11,11 @@ public class Order
     public int Id { get; set; }
     
     /// <summary>
+    /// Gets or sets the user ID who created the order
+    /// </summary>
+    public int? UserId { get; set; }
+    
+    /// <summary>
     /// Gets or sets the order number
     /// </summary>
     public string OrderNumber { get; set; } = string.Empty;
@@ -51,9 +56,9 @@ public class Order
     public decimal TotalAmount { get; set; }
     
     /// <summary>
-    /// Gets or sets the order status (pending, confirmed, shipped, completed, cancelled)
+    /// Gets or sets the order status (В сборке, Ожидает оплату, В пути, Доставлен, Отменен)
     /// </summary>
-    public string Status { get; set; } = "pending";
+    public string Status { get; set; } = "В сборке";
     
     /// <summary>
     /// Gets or sets the list of order items
@@ -69,5 +74,15 @@ public class Order
     /// Gets or sets the date and time when the order was last updated
     /// </summary>
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    
+    /// <summary>
+    /// Gets or sets the date and time when the order was cancelled
+    /// </summary>
+    public DateTime? CancelledAt { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the reason for order cancellation
+    /// </summary>
+    public string? CancellationReason { get; set; }
 }
 

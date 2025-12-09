@@ -59,11 +59,27 @@ public class ProductService : IProductService
     /// Gets a product by its unique identifier
     /// </summary>
     /// <param name="id">Product identifier</param>
+    /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
     /// <returns>Product information or null if not found</returns>
-    public async Task<ProductDto?> GetProductByIdAsync(int id)
+    public async Task<ProductDto?> GetProductByIdAsync(int id, string? sessionId = null)
     {
         var product = await _context.Products.FindAsync(id);
-        return product == null ? null : MapToDto(product);
+        if (product == null) return null;
+
+        var dto = MapToDto(product);
+
+        // Вычисляем зарезервированное количество для этого товара
+        var expirationTime = DateTime.UtcNow.AddMinutes(-20);
+        var reservedQuantity = await _context.CartItems
+            .Where(c => c.ProductId == id &&
+                       (sessionId == null || c.SessionId != sessionId) &&
+                       c.UpdatedAt > expirationTime) // Только активные резервы (не старше 20 минут)
+            .SumAsync(c => (int?)c.Quantity) ?? 0;
+
+        // Вычисляем доступное количество (общее - зарезервированное)
+        dto.AvailableQuantity = Math.Max(0, product.QuantityInStock - reservedQuantity);
+
+        return dto;
     }
 
     /// <summary>

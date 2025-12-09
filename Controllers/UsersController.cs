@@ -99,6 +99,28 @@ public class UsersController : ControllerBase
     }
 
     /// <summary>
+    /// Checks if a user is admin by Telegram User ID
+    /// </summary>
+    /// <param name="telegramUserId">Telegram User ID</param>
+    /// <returns>True if user is admin, false otherwise</returns>
+    /// <response code="200">Returns admin status</response>
+    /// <response code="404">User not found</response>
+    [HttpGet("isadmin/{telegramUserId}")]
+    [AllowAnonymous]
+    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<bool>> IsAdmin(long telegramUserId)
+    {
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.TelegramUserId == telegramUserId);
+
+        if (user == null)
+            return NotFound(false);
+
+        return Ok(user.IsAdmin);
+    }
+
+    /// <summary>
     /// Gets a user by ID
     /// </summary>
     /// <param name="id">User ID</param>

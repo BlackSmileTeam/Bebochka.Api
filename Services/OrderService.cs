@@ -60,6 +60,7 @@ public class OrderService : IOrderService
         var order = new Order
         {
             OrderNumber = orderNumber,
+            UserId = dto.UserId,
             CustomerName = dto.CustomerName,
             CustomerPhone = dto.CustomerPhone,
             CustomerEmail = dto.CustomerEmail,
@@ -67,7 +68,7 @@ public class OrderService : IOrderService
             DeliveryMethod = dto.DeliveryMethod,
             Comment = dto.Comment,
             TotalAmount = totalAmount,
-            Status = "pending",
+            Status = "В сборке",
             OrderItems = orderItems,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -113,6 +114,87 @@ public class OrderService : IOrderService
             .FirstOrDefaultAsync(o => o.Id == id);
 
         return order == null ? null : MapToDto(order);
+    }
+
+    public async Task<List<OrderDto>> GetUserOrdersAsync(int userId)
+    {
+        var orders = await _context.Orders
+            .Include(o => o.OrderItems)
+            .Where(o => o.UserId == userId)
+            .OrderByDescending(o => o.CreatedAt)
+            .ToListAsync();
+
+        return orders.Select(MapToDto).ToList();
+    }
+
+    public async Task<bool> CancelOrderAsync(int orderId, string? reason = null)
+    {
+        var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .FirstOrDefaultAsync(o => o.Id == orderId);
+
+        if (order == null)
+            return false;
+
+        if (order.Status == "Доставлен" || order.Status == "Отменен")
+            return false;
+
+        // Return products to stock
+        foreach (var item in order.OrderItems)
+        {
+            var product = await _context.Products.FindAsync(item.ProductId);
+            if (product != null)
+            {
+                product.QuantityInStock += item.Quantity;
+            }
+        }
+
+        order.Status = "Отменен";
+        order.CancelledAt = DateTime.UtcNow;
+        order.CancellationReason = reason;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<bool> UpdateOrderStatusAsync(int orderId, string status)
+    {
+        var validStatuses = new[] { "В сборке", "Ожидает оплату", "В пути", "Доставлен", "Отменен" };
+        if (!validStatuses.Contains(status))
+            return false;
+
+        var order = await _context.Orders.FindAsync(orderId);
+        if (order == null)
+            return false;
+
+        order.Status = status;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        if (status == "Отменен" && order.CancelledAt == null)
+        {
+            order.CancelledAt = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<OrderStatisticsDto> GetStatisticsAsync()
+    {
+        var orders = await _context.Orders.ToListAsync();
+
+        return new OrderStatisticsDto
+        {
+            TotalOrders = orders.Count,
+            PendingOrders = orders.Count(o => o.Status == "В сборке"),
+            AwaitingPaymentOrders = orders.Count(o => o.Status == "Ожидает оплату"),
+            InTransitOrders = orders.Count(o => o.Status == "В пути"),
+            DeliveredOrders = orders.Count(o => o.Status == "Доставлен"),
+            CancelledOrders = orders.Count(o => o.Status == "Отменен"),
+            TotalRevenue = orders.Where(o => o.Status == "Доставлен").Sum(o => o.TotalAmount),
+            PendingRevenue = orders.Where(o => o.Status != "Отменен" && o.Status != "Доставлен").Sum(o => o.TotalAmount)
+        };
     }
 
     private static OrderDto MapToDto(Order order)
