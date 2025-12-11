@@ -74,6 +74,12 @@ public class ProductDto
     /// Gets or sets the product condition (новая, отличное, недостаток)
     /// </summary>
     public string? Condition { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the date and time when the product should be published
+    /// If null, product is published immediately
+    /// </summary>
+    public DateTime? PublishedAt { get; set; }
 }
 
 /// <summary>
@@ -130,6 +136,12 @@ public class CreateProductDto
     /// Gets or sets the product condition (новая, отличное, недостаток)
     /// </summary>
     public string? Condition { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the date and time when the product should be published
+    /// If null, product is published immediately
+    /// </summary>
+    public DateTime? PublishedAt { get; set; }
 }
 
 /// <summary>
@@ -191,4 +203,10 @@ public class UpdateProductDto
     /// Gets or sets the product condition (новая, отличное, недостаток)
     /// </summary>
     public string? Condition { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the date and time when the product should be published
+    /// If null, product is published immediately
+    /// </summary>
+    public DateTime? PublishedAt { get; set; }
 }

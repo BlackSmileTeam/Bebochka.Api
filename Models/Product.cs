@@ -83,4 +83,10 @@ public class Product
     /// Gets or sets the product condition (новая, отличное, недостаток)
     /// </summary>
     public string? Condition { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the date and time when the product should be published and become visible in catalog
+    /// If null, product is published immediately
+    /// </summary>
+    public DateTime? PublishedAt { get; set; }
 }

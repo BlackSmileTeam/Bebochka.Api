@@ -45,4 +45,10 @@ public interface IProductService
     /// <param name="id">Product identifier</param>
     /// <returns>True if product was deleted, false if not found</returns>
     Task<bool> DeleteProductAsync(int id);
+    
+    /// <summary>
+    /// Gets all products that should be published now but haven't been notified yet
+    /// </summary>
+    /// <returns>List of products ready for publication</returns>
+    Task<List<Models.Product>> GetProductsReadyForPublicationAsync();
 }

@@ -30,7 +30,7 @@ UPDATE Orders
 SET Status = CASE 
     WHEN Status = 'pending' THEN 'В сборке'
     WHEN Status = 'confirmed' THEN 'Ожидает оплату'
-    WHEN Status = 'shipped' THEN 'В пути'
+    WHEN Status = 'shipped' THEN 'В пути'   
     WHEN Status = 'completed' THEN 'Доставлен'
     WHEN Status = 'cancelled' THEN 'Отменен'
     ELSE Status

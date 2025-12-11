@@ -28,7 +28,9 @@ public class ProductService : IProductService
     /// <returns>List of all products</returns>
     public async Task<List<ProductDto>> GetAllProductsAsync(string? sessionId = null)
     {
+        var now = DateTime.UtcNow;
         var products = await _context.Products
+            .Where(p => p.PublishedAt == null || p.PublishedAt <= now) // Only show published products
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 
@@ -63,7 +65,10 @@ public class ProductService : IProductService
     /// <returns>Product information or null if not found</returns>
     public async Task<ProductDto?> GetProductByIdAsync(int id, string? sessionId = null)
     {
-        var product = await _context.Products.FindAsync(id);
+        var now = DateTime.UtcNow;
+        var product = await _context.Products
+            .Where(p => p.Id == id && (p.PublishedAt == null || p.PublishedAt <= now))
+            .FirstOrDefaultAsync();
         if (product == null) return null;
 
         var dto = MapToDto(product);
@@ -102,6 +107,7 @@ public class ProductService : IProductService
             QuantityInStock = dto.QuantityInStock > 0 ? dto.QuantityInStock : 1,
             Gender = dto.Gender,
             Condition = dto.Condition,
+            PublishedAt = dto.PublishedAt,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -134,6 +140,7 @@ public class ProductService : IProductService
         product.QuantityInStock = dto.QuantityInStock > 0 ? dto.QuantityInStock : product.QuantityInStock;
         product.Gender = dto.Gender;
         product.Condition = dto.Condition;
+        product.PublishedAt = dto.PublishedAt;
         product.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -177,8 +184,27 @@ public class ProductService : IProductService
             QuantityInStock = product.QuantityInStock,
             Gender = product.Gender,
             Condition = product.Condition,
+            PublishedAt = product.PublishedAt,
             CreatedAt = product.CreatedAt,
             UpdatedAt = product.UpdatedAt
         };
+    }
+    
+    /// <summary>
+    /// Gets all products that should be published now but haven't been notified yet
+    /// </summary>
+    /// <returns>List of products ready for publication</returns>
+    public async Task<List<Product>> GetProductsReadyForPublicationAsync()
+    {
+        var now = DateTime.UtcNow;
+        // Get products that have PublishedAt set and it's time to publish them
+        // We'll check for products published in the last minute to avoid duplicates
+        var oneMinuteAgo = now.AddMinutes(-1);
+        
+        return await _context.Products
+            .Where(p => p.PublishedAt != null && 
+                       p.PublishedAt <= now && 
+                       p.PublishedAt > oneMinuteAgo)
+            .ToListAsync();
     }
 }
