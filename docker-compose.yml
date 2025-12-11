@@ -11,6 +11,7 @@ services:
     environment:
       - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
       - ASPNETCORE_URLS=http://+:44315
+      - TelegramBot__Token=${TELEGRAM_BOT_TOKEN}
     volumes:
       - ./wwwroot/uploads:/app/wwwroot/uploads
     restart: unless-stopped

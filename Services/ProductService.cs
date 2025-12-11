@@ -207,4 +207,17 @@ public class ProductService : IProductService
                        p.PublishedAt > oneMinuteAgo)
             .ToListAsync();
     }
+    
+    /// <summary>
+    /// Gets all products for admin panel (including unpublished products)
+    /// </summary>
+    /// <returns>List of all products regardless of publication status</returns>
+    public async Task<List<ProductDto>> GetAllProductsForAdminAsync()
+    {
+        var products = await _context.Products
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+
+        return products.Select(p => MapToDto(p)).ToList();
+    }
 }

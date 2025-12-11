@@ -51,4 +51,10 @@ public interface IProductService
     /// </summary>
     /// <returns>List of products ready for publication</returns>
     Task<List<Models.Product>> GetProductsReadyForPublicationAsync();
+    
+    /// <summary>
+    /// Gets all products for admin panel (including unpublished products)
+    /// </summary>
+    /// <returns>List of all products regardless of publication status</returns>
+    Task<List<ProductDto>> GetAllProductsForAdminAsync();
 }

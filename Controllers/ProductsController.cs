@@ -297,5 +297,21 @@ public class ProductsController : ControllerBase
 
         return NoContent();
     }
+
+    /// <summary>
+    /// Gets all products for admin panel (including unpublished products)
+    /// </summary>
+    /// <returns>List of all products regardless of publication status</returns>
+    /// <response code="200">Returns the list of all products</response>
+    /// <response code="401">Unauthorized</response>
+    [HttpGet("admin/all")]
+    [Authorize]
+    [ProducesResponseType(typeof(List<ProductDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<List<ProductDto>>> GetAllProductsForAdmin()
+    {
+        var products = await _productService.GetAllProductsForAdminAsync();
+        return Ok(products);
+    }
 }
 
