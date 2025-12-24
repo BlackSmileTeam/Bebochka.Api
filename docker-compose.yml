@@ -3,7 +3,7 @@ services:
     image: bebochka-backend:latest
     container_name: bebochka-backend
     ports:
-      - "44315:44315"
+      - "55501:44315"
     environment:
       - ConnectionStrings__DefaultConnection=${DB_CONNECTION_STRING}
       - ASPNETCORE_URLS=http://+:44315
