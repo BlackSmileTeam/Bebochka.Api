@@ -48,18 +48,33 @@ public class ProductPublicationService : BackgroundService
 
         try
         {
-            // Get products that were just published (in the last minute)
+            var utcNow = DateTime.UtcNow;
+            _logger.LogDebug("Checking for publications at UTC time: {UtcNow}", utcNow);
+
+            // Get products that were just published (in the last 10 minutes)
             var readyProducts = await productService.GetProductsReadyForPublicationAsync();
+
+            _logger.LogDebug("Found {Count} products ready for publication (UTC: {UtcNow})", readyProducts.Count, utcNow);
 
             if (readyProducts.Any())
             {
-                _logger.LogInformation("Found {Count} products ready for publication", readyProducts.Count);
+                _logger.LogInformation("Found {Count} products ready for publication at {UtcNow} UTC", readyProducts.Count, utcNow);
+                
+                foreach (var product in readyProducts)
+                {
+                    _logger.LogInformation("Product {ProductId} '{ProductName}' published at {PublishedAt} UTC", 
+                        product.Id, product.Name, product.PublishedAt);
+                }
 
                 // Send notification to all Telegram users
                 var notificationMessage = "Уважаемые дамы, каталог был обновлен. Успевайте забронировать товар!";
                 var sentCount = await telegramService.SendBroadcastMessageAsync(notificationMessage);
 
-                _logger.LogInformation("Publication notification sent to {SentCount} users", sentCount);
+                _logger.LogInformation("Publication notification sent to {SentCount} users at {UtcNow} UTC", sentCount, utcNow);
+            }
+            else
+            {
+                _logger.LogDebug("No products ready for publication at {UtcNow} UTC", utcNow);
             }
         }
         catch (Exception ex)
