@@ -26,9 +26,19 @@ public class TelegramNotificationService : ITelegramNotificationService
         _httpClient = httpClient;
         _logger = logger;
         _context = context;
-        _botToken = configuration["TelegramBot:Token"] 
-            ?? throw new InvalidOperationException("TelegramBot:Token not found in configuration");
+        
+        var tokenFromConfig = configuration["TelegramBot:Token"];
+        if (string.IsNullOrWhiteSpace(tokenFromConfig))
+        {
+            _logger.LogError("TelegramBot:Token is not configured or is empty");
+            throw new InvalidOperationException("TelegramBot:Token not found in configuration or is empty");
+        }
+        
+        _botToken = tokenFromConfig;
         _botApiUrl = $"https://api.telegram.org/bot{_botToken}";
+        
+        // Log token presence (but not the actual token for security)
+        _logger.LogInformation("TelegramNotificationService initialized. Bot token configured: {TokenPresent}", !string.IsNullOrEmpty(_botToken));
     }
 
     /// <summary>
@@ -87,7 +97,16 @@ public class TelegramNotificationService : ITelegramNotificationService
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(_botToken))
+            {
+                _logger.LogError("Cannot send message: Bot token is empty");
+                return false;
+            }
+
             var url = $"{_botApiUrl}/sendMessage";
+            _logger.LogDebug("Sending message to Telegram API: {Url} (chatId: {ChatId})", 
+                url.Replace(_botToken, "***"), chatId);
+            
             var payload = new
             {
                 chat_id = chatId,
@@ -105,8 +124,8 @@ public class TelegramNotificationService : ITelegramNotificationService
             else
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("Failed to send message to chat {ChatId}. Status: {Status}, Error: {Error}", 
-                    chatId, response.StatusCode, errorContent);
+                _logger.LogWarning("Failed to send message to chat {ChatId}. Status: {Status}, URL: {Url}, Error: {Error}", 
+                    chatId, response.StatusCode, url.Replace(_botToken, "***"), errorContent);
                 return false;
             }
         }
