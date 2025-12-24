@@ -1,7 +1,10 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Bebochka.Api.Services;
 using Bebochka.Api.Models.DTOs;
+using Bebochka.Api.Data;
+using Bebochka.Api.Models;
 
 namespace Bebochka.Api.Controllers;
 
@@ -10,19 +13,113 @@ namespace Bebochka.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
 [Produces("application/json")]
 public class TelegramController : ControllerBase
 {
     private readonly ITelegramNotificationService _telegramService;
     private readonly ILogger<TelegramController> _logger;
+    private readonly AppDbContext _context;
 
     public TelegramController(
         ITelegramNotificationService telegramService,
-        ILogger<TelegramController> logger)
+        ILogger<TelegramController> logger,
+        AppDbContext context)
     {
         _telegramService = telegramService;
         _logger = logger;
+        _context = context;
+    }
+
+    /// <summary>
+    /// Registers a Telegram User ID for notifications (called automatically when user interacts with bot)
+    /// </summary>
+    /// <param name="telegramUserId">Telegram User ID</param>
+    /// <returns>Success response</returns>
+    /// <response code="200">Telegram User ID registered successfully</response>
+    [HttpPost("register/{telegramUserId}")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult> RegisterTelegramUser(long telegramUserId)
+    {
+        try
+        {
+            // Check if user with this Telegram ID already exists
+            var existingUser = await _context.Users
+                .FirstOrDefaultAsync(u => u.TelegramUserId == telegramUserId);
+
+            if (existingUser != null)
+            {
+                // User already registered, ensure they are active
+                if (!existingUser.IsActive)
+                {
+                    existingUser.IsActive = true;
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation("Reactivated user with Telegram ID {TelegramUserId}", telegramUserId);
+                }
+                return Ok(new { message = "Telegram User ID already registered", registered = true });
+            }
+
+            // Create new user entry for notifications only
+            // If no user with this Telegram ID exists, create a minimal user entry
+            // Generate unique username by appending timestamp to avoid conflicts
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var username = $"telegram_{telegramUserId}_{timestamp}";
+            
+            // Try to create user, but handle potential username conflicts
+            var maxAttempts = 3;
+            for (int attempt = 0; attempt < maxAttempts; attempt++)
+            {
+                try
+                {
+                    var newUser = new User
+                    {
+                        Username = attempt == 0 ? username : $"{username}_{attempt}",
+                        PasswordHash = BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString()), // Random password, won't be used
+                        TelegramUserId = telegramUserId,
+                        IsActive = true,
+                        IsAdmin = false,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    _context.Users.Add(newUser);
+                    await _context.SaveChangesAsync();
+
+                    _logger.LogInformation("Registered new Telegram user {TelegramUserId}", telegramUserId);
+                    return Ok(new { message = "Telegram User ID registered successfully", registered = true });
+                }
+                catch (DbUpdateException ex) when (ex.InnerException?.Message?.Contains("Duplicate") == true || 
+                                                    ex.InnerException?.Message?.Contains("unique") == true)
+                {
+                    // Username conflict, try again with different username
+                    if (attempt == maxAttempts - 1)
+                    {
+                        _logger.LogError(ex, "Failed to create user after {Attempts} attempts", maxAttempts);
+                        throw;
+                    }
+                    continue;
+                }
+            }
+
+            return StatusCode(500, new { message = "Failed to register Telegram user after multiple attempts" });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error registering Telegram user {TelegramUserId}", telegramUserId);
+            // If error is due to duplicate username, try to find and update existing user
+            if (ex.Message.Contains("Duplicate") || ex.Message.Contains("unique"))
+            {
+                var existingUser = await _context.Users
+                    .FirstOrDefaultAsync(u => u.Username == $"telegram_{telegramUserId}");
+                if (existingUser != null)
+                {
+                    existingUser.TelegramUserId = telegramUserId;
+                    existingUser.IsActive = true;
+                    await _context.SaveChangesAsync();
+                    return Ok(new { message = "Telegram User ID registered successfully", registered = true });
+                }
+            }
+            return StatusCode(500, new { message = "Error registering Telegram user", error = ex.Message });
+        }
     }
 
     /// <summary>
@@ -34,6 +131,7 @@ public class TelegramController : ControllerBase
     /// <response code="400">Invalid request</response>
     /// <response code="401">Unauthorized</response>
     [HttpPost("broadcast")]
+    [Authorize]
     [ProducesResponseType(typeof(BroadcastMessageResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -72,6 +170,7 @@ public class TelegramController : ControllerBase
     /// <response code="400">Invalid request</response>
     /// <response code="401">Unauthorized</response>
     [HttpPost("send/{chatId}")]
+    [Authorize]
     [ProducesResponseType(typeof(SendMessageResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

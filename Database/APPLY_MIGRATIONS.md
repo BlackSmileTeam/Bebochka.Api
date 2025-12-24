@@ -78,11 +78,67 @@ SHOW INDEXES FROM Products WHERE Key_name = 'idx_products_published_at';
 SHOW INDEXES FROM Users WHERE Key_name = 'idx_users_telegram_userid';
 ```
 
+## Связывание пользователя с Telegram User ID
+
+После применения миграции необходимо связать вашего пользователя с Telegram User ID для получения уведомлений.
+
+### Как получить Telegram User ID:
+
+1. **Через бота @userinfobot:**
+   - Найдите бота @userinfobot в Telegram
+   - Отправьте команду `/start`
+   - Бот покажет ваш User ID
+
+2. **Через бота @getmyid_bot:**
+   - Найдите бота @getmyid_bot в Telegram
+   - Отправьте любое сообщение
+   - Бот ответит с вашим User ID
+
+### Связывание через SQL:
+
+Выполните SQL команду:
+
+```sql
+USE bebochka;
+
+-- Замените YOUR_TELEGRAM_USER_ID на ваш реальный ID (например: 123456789)
+-- Замените YOUR_USERNAME на ваше имя пользователя (например: 'admin')
+UPDATE Users SET TelegramUserId = YOUR_TELEGRAM_USER_ID WHERE Username = 'YOUR_USERNAME';
+```
+
+**Пример:**
+```sql
+UPDATE Users SET TelegramUserId = 123456789 WHERE Username = 'admin';
+```
+
+### Проверка:
+
+```sql
+SELECT Id, Username, TelegramUserId, IsActive FROM Users;
+```
+
+Убедитесь, что в колонке `TelegramUserId` указан ваш ID.
+
+### Альтернативный способ через API:
+
+Если у вас есть доступ к API, можно использовать endpoint:
+
+```
+PUT /api/users/{id}/telegram
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+
+{
+  "telegramUserId": YOUR_TELEGRAM_USER_ID
+}
+```
+
 ## Важно
 
 - Скрипт безопасен для повторного выполнения - он проверяет наличие колонок перед добавлением
 - Не забудьте сделать backup базы данных перед миграцией
 - После миграции перезапустите приложение, чтобы изменения вступили в силу
+- После связывания Telegram User ID перезапустите приложение для применения изменений
 
 ## Откат миграции (если необходимо)
 
