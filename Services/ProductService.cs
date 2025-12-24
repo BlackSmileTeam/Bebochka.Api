@@ -198,15 +198,14 @@ public class ProductService : IProductService
     {
         var now = DateTime.UtcNow;
         // Get products that have PublishedAt set and it's time to publish them
-        // Check for products published in the last 30 minutes to catch missed notifications
-        // and avoid duplicates (service checks every minute)
-        // Increased window to account for timing issues and timezone differences
-        var thirtyMinutesAgo = now.AddMinutes(-30);
+        // Check for products published in the last 5 minutes to catch products that just became available
+        // The service checks every minute, so this window is sufficient
+        var fiveMinutesAgo = now.AddMinutes(-5);
         
         var products = await _context.Products
             .Where(p => p.PublishedAt != null && 
                        p.PublishedAt <= now && 
-                       p.PublishedAt > thirtyMinutesAgo)
+                       p.PublishedAt > fiveMinutesAgo)
             .OrderBy(p => p.PublishedAt)
             .ToListAsync();
         

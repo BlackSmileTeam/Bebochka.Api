@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
+using System.Linq;
 
 namespace Bebochka.Api.Services;
 
@@ -10,6 +12,8 @@ public class ProductPublicationService : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<ProductPublicationService> _logger;
     private readonly TimeSpan _checkInterval = TimeSpan.FromMinutes(1); // Check every minute
+    // Track which products have already received notifications (productId -> notification sent time)
+    private readonly ConcurrentDictionary<int, DateTime> _notifiedProducts = new();
 
     public ProductPublicationService(
         IServiceProvider serviceProvider,
@@ -49,24 +53,46 @@ public class ProductPublicationService : BackgroundService
         try
         {
             var utcNow = DateTime.UtcNow;
+            
+            // Clean up old entries from memory (older than 1 hour) to prevent memory leaks
+            var oneHourAgo = utcNow.AddHours(-1);
+            var keysToRemove = _notifiedProducts
+                .Where(kvp => kvp.Value < oneHourAgo)
+                .Select(kvp => kvp.Key)
+                .ToList();
+            foreach (var key in keysToRemove)
+            {
+                _notifiedProducts.TryRemove(key, out _);
+            }
+
             _logger.LogDebug("Checking for publications at UTC time: {UtcNow}", utcNow);
 
-            // Get products that were just published (in the last 10 minutes)
+            // Get products that were just published (in the last 5 minutes)
+            // Using a narrow window to minimize duplicates, but wide enough to catch products if service was briefly down
             var readyProducts = await productService.GetProductsReadyForPublicationAsync();
 
-            _logger.LogDebug("Found {Count} products ready for publication (UTC: {UtcNow})", readyProducts.Count, utcNow);
+            // Filter out products that have already received notifications
+            var newProducts = readyProducts
+                .Where(p => !_notifiedProducts.ContainsKey(p.Id))
+                .ToList();
 
-            if (readyProducts.Any())
+            _logger.LogDebug("Found {TotalCount} products ready for publication, {NewCount} new ones (UTC: {UtcNow})", 
+                readyProducts.Count, newProducts.Count, utcNow);
+
+            if (newProducts.Any())
             {
-                _logger.LogInformation("Found {Count} products ready for publication at {UtcNow} UTC", readyProducts.Count, utcNow);
+                _logger.LogInformation("Found {Count} new products ready for publication at {UtcNow} UTC", newProducts.Count, utcNow);
                 
-                foreach (var product in readyProducts)
+                foreach (var product in newProducts)
                 {
                     _logger.LogInformation("Product {ProductId} '{ProductName}' published at {PublishedAt} UTC", 
                         product.Id, product.Name, product.PublishedAt);
+                    
+                    // Mark as notified in memory
+                    _notifiedProducts.TryAdd(product.Id, utcNow);
                 }
 
-                // Send notification to all Telegram users
+                // Send notification to all Telegram users (only once per batch of new products)
                 var notificationMessage = "Уважаемые дамы, каталог был обновлен. Успевайте забронировать товар!";
                 var sentCount = await telegramService.SendBroadcastMessageAsync(notificationMessage);
 
@@ -74,7 +100,7 @@ public class ProductPublicationService : BackgroundService
             }
             else
             {
-                _logger.LogDebug("No products ready for publication at {UtcNow} UTC", utcNow);
+                _logger.LogDebug("No new products ready for publication at {UtcNow} UTC", utcNow);
             }
         }
         catch (Exception ex)
