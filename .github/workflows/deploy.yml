@@ -215,8 +215,12 @@ jobs:
 
           cd $DEPLOY_DIR
           
-          # Stop and remove old containers
+          # Stop and remove old containers (force remove if needed)
           docker-compose down || true
+          
+          # Force remove container by name if it still exists (from old docker run)
+          docker stop $IMAGE_NAME || true
+          docker rm -f $IMAGE_NAME || true
 
           # Ensure uploads directory has correct permissions
           mkdir -p wwwroot/uploads
