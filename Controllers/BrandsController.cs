@@ -31,6 +31,7 @@ public class BrandsController : ControllerBase
         
         if (!string.IsNullOrWhiteSpace(search))
         {
+            // Case-insensitive search - MySQL utf8mb4_unicode_ci collation handles this automatically
             query = query.Where(b => b.Name.Contains(search));
         }
         

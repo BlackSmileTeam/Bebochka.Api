@@ -63,17 +63,35 @@ public class AnnouncementsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<Announcement>> CreateAnnouncement([FromBody] CreateAnnouncementDto dto)
     {
+        if (dto == null)
+        {
+            return BadRequest(new { message = "Request body is required" });
+        }
+
         if (string.IsNullOrWhiteSpace(dto.Message))
         {
             return BadRequest(new { message = "Message is required" });
         }
 
+        // Check if ScheduledAt is provided and valid
+        if (dto.ScheduledAt == default(DateTime))
+        {
+            return BadRequest(new { message = "Scheduled time is required" });
+        }
+        
+        _logger.LogInformation("Creating announcement. ScheduledAt (UTC): {ScheduledAtUtc}, ProductIds count: {ProductIdsCount}", 
+            dto.ScheduledAt, dto.ProductIds?.Count ?? 0);
+
         // Frontend sends ISO datetime string where the time components represent Moscow time
+        // The DateTime from JSON deserialization will be in UTC, but the hour/minute components represent Moscow time
         // We extract the components (year, month, day, hour, minute) and store them as Moscow time
         // MySQL DATETIME doesn't store timezone, so we store the components directly
         var moscowNow = DateTimeHelper.GetMoscowTime();
         
-        // Extract date/time components from the UTC DateTime (which represents Moscow time components)
+        // When JSON deserializes ISO string, it creates UTC DateTime
+        // But since frontend created it with Date.UTC() using Moscow time components,
+        // we can extract the components directly
+        // Note: dto.ScheduledAt will be in UTC, but the hour/minute represent Moscow time
         var scheduledAtMoscow = new DateTime(
             dto.ScheduledAt.Year,
             dto.ScheduledAt.Month,
@@ -86,7 +104,7 @@ public class AnnouncementsController : ControllerBase
         
         if (scheduledAtMoscow < moscowNow)
         {
-            return BadRequest(new { message = "Scheduled time must be in the future" });
+            return BadRequest(new { message = $"Scheduled time must be in the future. Current Moscow time: {moscowNow:yyyy-MM-dd HH:mm:ss}, Scheduled: {scheduledAtMoscow:yyyy-MM-dd HH:mm:ss}" });
         }
 
         var announcement = new Announcement
