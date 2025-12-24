@@ -40,6 +40,16 @@ public class AppDbContext : DbContext
     /// Gets or sets the OrderItems database set
     /// </summary>
     public DbSet<OrderItem> OrderItems { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the Announcements database set
+    /// </summary>
+    public DbSet<Announcement> Announcements { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the Brands database set
+    /// </summary>
+    public DbSet<Brand> Brands { get; set; }
 
     /// <summary>
     /// Configures the entity models and their relationships
@@ -74,7 +84,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.TelegramUserId);
             entity.Property(e => e.IsAdmin).HasDefaultValue(false);
             entity.HasIndex(e => e.Username).IsUnique();
-            entity.HasIndex(e => e.TelegramUserId).IsUnique();
+            entity.HasIndex(e => e.TelegramUserId).IsUnique().HasFilter("[TelegramUserId] IS NOT NULL");
         });
 
         modelBuilder.Entity<CartItem>(entity =>
@@ -117,6 +127,25 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Announcement>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Message).IsRequired().HasMaxLength(2000);
+            entity.Property(e => e.ProductIdsJson).HasColumnName("ProductIds");
+            entity.Ignore(e => e.ProductIds);
+            entity.Property(e => e.CollageImagesJson).HasColumnName("CollageImages");
+            entity.Ignore(e => e.CollageImages);
+            entity.HasIndex(e => e.ScheduledAt);
+            entity.HasIndex(e => e.IsSent);
+        });
+
+        modelBuilder.Entity<Brand>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(e => e.Name).IsUnique();
         });
     }
 }

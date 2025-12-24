@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Bebochka.Api.Data;
 using Bebochka.Api.Models;
 using Bebochka.Api.Models.DTOs;
+using Bebochka.Api.Helpers;
 
 namespace Bebochka.Api.Services;
 
@@ -23,14 +24,15 @@ public class ProductService : IProductService
 
     /// <summary>
     /// Gets all products from the database, ordered by creation date (newest first)
+    /// PublishedAt is stored as Moscow time, so we compare with current Moscow time
     /// </summary>
     /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
     /// <returns>List of all products</returns>
     public async Task<List<ProductDto>> GetAllProductsAsync(string? sessionId = null)
     {
-        var now = DateTime.UtcNow;
+        var moscowNow = DateTimeHelper.GetMoscowTime();
         var products = await _context.Products
-            .Where(p => p.PublishedAt == null || p.PublishedAt <= now) // Only show published products
+            .Where(p => p.PublishedAt == null || p.PublishedAt <= moscowNow) // Only show published products (compare with Moscow time)
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 
@@ -59,15 +61,16 @@ public class ProductService : IProductService
 
     /// <summary>
     /// Gets a product by its unique identifier
+    /// PublishedAt is stored as Moscow time, so we compare with current Moscow time
     /// </summary>
     /// <param name="id">Product identifier</param>
     /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
     /// <returns>Product information or null if not found</returns>
     public async Task<ProductDto?> GetProductByIdAsync(int id, string? sessionId = null)
     {
-        var now = DateTime.UtcNow;
+        var moscowNow = DateTimeHelper.GetMoscowTime();
         var product = await _context.Products
-            .Where(p => p.Id == id && (p.PublishedAt == null || p.PublishedAt <= now))
+            .Where(p => p.Id == id && (p.PublishedAt == null || p.PublishedAt <= moscowNow))
             .FirstOrDefaultAsync();
         if (product == null) return null;
 
@@ -89,12 +92,14 @@ public class ProductService : IProductService
 
     /// <summary>
     /// Creates a new product in the database
+    /// PublishedAt is stored as Moscow time (without UTC conversion)
     /// </summary>
     /// <param name="dto">Product data transfer object</param>
     /// <param name="imagePaths">List of image file paths</param>
     /// <returns>Created product</returns>
     public async Task<ProductDto> CreateProductAsync(CreateProductDto dto, List<string> imagePaths)
     {
+        // PublishedAt from frontend is already in Moscow time format, store it directly
         var product = new Product
         {
             Name = dto.Name,
@@ -107,7 +112,7 @@ public class ProductService : IProductService
             QuantityInStock = dto.QuantityInStock > 0 ? dto.QuantityInStock : 1,
             Gender = dto.Gender,
             Condition = dto.Condition,
-            PublishedAt = dto.PublishedAt,
+            PublishedAt = dto.PublishedAt, // Store as Moscow time directly
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -140,7 +145,24 @@ public class ProductService : IProductService
         product.QuantityInStock = dto.QuantityInStock > 0 ? dto.QuantityInStock : product.QuantityInStock;
         product.Gender = dto.Gender;
         product.Condition = dto.Condition;
-        product.PublishedAt = dto.PublishedAt;
+        // PublishedAt comes as UTC DateTime but represents Moscow time components
+        // Extract components and store as Moscow time
+        if (dto.PublishedAt.HasValue)
+        {
+            product.PublishedAt = new DateTime(
+                dto.PublishedAt.Value.Year,
+                dto.PublishedAt.Value.Month,
+                dto.PublishedAt.Value.Day,
+                dto.PublishedAt.Value.Hour,
+                dto.PublishedAt.Value.Minute,
+                dto.PublishedAt.Value.Second,
+                DateTimeKind.Unspecified
+            );
+        }
+        else
+        {
+            product.PublishedAt = null;
+        }
         product.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -192,19 +214,20 @@ public class ProductService : IProductService
     
     /// <summary>
     /// Gets all products that should be published now but haven't been notified yet
+    /// PublishedAt is stored as Moscow time in the database, so we compare with current Moscow time
     /// </summary>
     /// <returns>List of products ready for publication</returns>
     public async Task<List<Product>> GetProductsReadyForPublicationAsync()
     {
-        var now = DateTime.UtcNow;
-        // Get products that have PublishedAt set and it's time to publish them
+        // Get current Moscow time for comparison
+        var moscowNow = DateTimeHelper.GetMoscowTime();
         // Check for products published in the last 5 minutes to catch products that just became available
-        // The service checks every minute, so this window is sufficient
-        var fiveMinutesAgo = now.AddMinutes(-5);
+        var fiveMinutesAgo = moscowNow.AddMinutes(-5);
         
+        // PublishedAt is stored as Moscow time, so we compare directly
         var products = await _context.Products
             .Where(p => p.PublishedAt != null && 
-                       p.PublishedAt <= now && 
+                       p.PublishedAt <= moscowNow && 
                        p.PublishedAt > fiveMinutesAgo)
             .OrderBy(p => p.PublishedAt)
             .ToListAsync();
@@ -219,6 +242,22 @@ public class ProductService : IProductService
     public async Task<List<ProductDto>> GetAllProductsForAdminAsync()
     {
         var products = await _context.Products
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+
+        return products.Select(p => MapToDto(p)).ToList();
+    }
+    
+    /// <summary>
+    /// Gets all unpublished products (for announcement selection)
+    /// PublishedAt is stored as Moscow time, so we compare with current Moscow time
+    /// </summary>
+    /// <returns>List of unpublished products</returns>
+    public async Task<List<ProductDto>> GetUnpublishedProductsAsync()
+    {
+        var moscowNow = DateTimeHelper.GetMoscowTime();
+        var products = await _context.Products
+            .Where(p => p.PublishedAt != null && p.PublishedAt > moscowNow) // Only unpublished products (compare with Moscow time)
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 

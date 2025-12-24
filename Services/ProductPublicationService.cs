@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using System.Collections.Concurrent;
 using System.Linq;
+using Bebochka.Api.Helpers;
 
 namespace Bebochka.Api.Services;
 
@@ -52,6 +53,7 @@ public class ProductPublicationService : BackgroundService
 
         try
         {
+            var moscowNow = DateTimeHelper.GetMoscowTime();
             var utcNow = DateTime.UtcNow;
             
             // Clean up old entries from memory (older than 1 hour) to prevent memory leaks
@@ -65,7 +67,7 @@ public class ProductPublicationService : BackgroundService
                 _notifiedProducts.TryRemove(key, out _);
             }
 
-            _logger.LogDebug("Checking for publications at UTC time: {UtcNow}", utcNow);
+            _logger.LogDebug("Checking for publications at Moscow time: {MoscowNow} (UTC: {UtcNow})", moscowNow, utcNow);
 
             // Get products that were just published (in the last 5 minutes)
             // Using a narrow window to minimize duplicates, but wide enough to catch products if service was briefly down
@@ -76,16 +78,16 @@ public class ProductPublicationService : BackgroundService
                 .Where(p => !_notifiedProducts.ContainsKey(p.Id))
                 .ToList();
 
-            _logger.LogDebug("Found {TotalCount} products ready for publication, {NewCount} new ones (UTC: {UtcNow})", 
-                readyProducts.Count, newProducts.Count, utcNow);
+            _logger.LogDebug("Found {TotalCount} products ready for publication, {NewCount} new ones (Moscow: {MoscowNow})", 
+                readyProducts.Count, newProducts.Count, moscowNow);
 
             if (newProducts.Any())
             {
-                _logger.LogInformation("Found {Count} new products ready for publication at {UtcNow} UTC", newProducts.Count, utcNow);
+                _logger.LogInformation("Found {Count} new products ready for publication at {MoscowNow} Moscow time", newProducts.Count, moscowNow);
                 
                 foreach (var product in newProducts)
                 {
-                    _logger.LogInformation("Product {ProductId} '{ProductName}' published at {PublishedAt} UTC", 
+                    _logger.LogInformation("Product {ProductId} '{ProductName}' published at {PublishedAt} Moscow time", 
                         product.Id, product.Name, product.PublishedAt);
                     
                     // Mark as notified in memory
@@ -96,11 +98,11 @@ public class ProductPublicationService : BackgroundService
                 var notificationMessage = "Уважаемые дамы, каталог был обновлен. Успевайте забронировать товар!";
                 var sentCount = await telegramService.SendBroadcastMessageAsync(notificationMessage);
 
-                _logger.LogInformation("Publication notification sent to {SentCount} users at {UtcNow} UTC", sentCount, utcNow);
+                _logger.LogInformation("Publication notification sent to {SentCount} users at {MoscowNow} Moscow time", sentCount, moscowNow);
             }
             else
             {
-                _logger.LogDebug("No new products ready for publication at {UtcNow} UTC", utcNow);
+                _logger.LogDebug("No new products ready for publication at {MoscowNow} Moscow time", moscowNow);
             }
         }
         catch (Exception ex)

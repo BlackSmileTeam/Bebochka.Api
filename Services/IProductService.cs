@@ -57,4 +57,10 @@ public interface IProductService
     /// </summary>
     /// <returns>List of all products regardless of publication status</returns>
     Task<List<ProductDto>> GetAllProductsForAdminAsync();
+    
+    /// <summary>
+    /// Gets all unpublished products (for announcement selection)
+    /// </summary>
+    /// <returns>List of unpublished products</returns>
+    Task<List<ProductDto>> GetUnpublishedProductsAsync();
 }

@@ -186,6 +186,7 @@ builder.Services.AddAuthorization();
         builder.Services.AddScoped<IOrderService, OrderService>();
         builder.Services.AddScoped<IEmailService, EmailService>();
         builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
+        builder.Services.AddScoped<CollageService>();
         
         // Add HttpClient for Telegram Bot API
         builder.Services.AddHttpClient<ITelegramNotificationService, TelegramNotificationService>();
@@ -193,6 +194,7 @@ builder.Services.AddAuthorization();
         // Add background services
         builder.Services.AddHostedService<CartCleanupService>();
         builder.Services.AddHostedService<ProductPublicationService>();
+        builder.Services.AddHostedService<AnnouncementService>();
 
 var app = builder.Build();
 
