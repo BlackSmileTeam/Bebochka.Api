@@ -161,14 +161,14 @@ jobs:
         source: "${{ env.IMAGE_NAME }}.tar.gz"
         target: "/tmp/"
 
-    - name: Copy docker-compose.yml to server
+    - name: Copy docker-compose.yml and Dockerfile to server
       uses: appleboy/scp-action@v0.1.7
       with:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: ${{ env.SSH_PORT }}
-        source: "docker-compose.yml"
+        source: "docker-compose.yml,Dockerfile"
         target: "${{ env.DEPLOY_DIR }}/"
 
     - name: Create .env file on server
@@ -222,10 +222,8 @@ jobs:
           mkdir -p wwwroot/uploads
           chmod -R 777 wwwroot/uploads || true
           
-          # Start new containers using docker-compose (with loaded image)
-          # Use image from tar.gz instead of building
-          IMAGE_TAG="$IMAGE_NAME:latest"
-          docker-compose up -d --no-build || docker-compose up -d
+          # Start new containers using docker-compose (use already loaded image)
+          docker-compose up -d
           
           # Verify permissions after container start
           echo "Checking uploads directory permissions:"
