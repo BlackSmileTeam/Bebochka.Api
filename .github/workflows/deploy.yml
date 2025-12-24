@@ -10,7 +10,7 @@ env:
   SSH_PORT: 22
   CONTAINER_PORT: 44315
   HOST_PORT: 55501
-  DEPLOY_DIR: /opt/bebochka
+  DEPLOY_DIR: /root/bebochka-backend
   IMAGE_NAME: bebochka-backend
 
 jobs:
@@ -161,6 +161,41 @@ jobs:
         source: "${{ env.IMAGE_NAME }}.tar.gz"
         target: "/tmp/"
 
+    - name: Copy docker-compose.yml to server
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ env.SSH_PORT }}
+        source: "docker-compose.yml"
+        target: "${{ env.DEPLOY_DIR }}/"
+
+    - name: Create .env file on server
+      uses: appleboy/ssh-action@v1
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ env.SSH_PORT }}
+        envs: DB_CONNECTION_STRING,TELEGRAM_BOT_TOKEN
+        script: |
+          #!/bin/bash
+          set -euo pipefail
+          
+          # Create .env file with secrets
+          cat > ${{ env.DEPLOY_DIR }}/.env << EOF
+          DB_CONNECTION_STRING=$DB_CONNECTION_STRING
+          TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
+          EOF
+          
+          # Secure .env file
+          chmod 600 ${{ env.DEPLOY_DIR }}/.env
+          echo ".env file created successfully"
+      env:
+        DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
     - name: Deploy application
       uses: appleboy/ssh-action@v1
       with:
@@ -168,7 +203,7 @@ jobs:
         username: ${{ secrets.SSH_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: ${{ env.SSH_PORT }}
-        envs: DB_CONNECTION_STRING,CONTAINER_PORT,HOST_PORT,IMAGE_NAME,DEPLOY_DIR
+        envs: IMAGE_NAME,DEPLOY_DIR
         script: |
           #!/bin/bash
           set -euo pipefail
@@ -178,36 +213,29 @@ jobs:
           docker load < /tmp/$IMAGE_NAME.tar.gz
           rm /tmp/$IMAGE_NAME.tar.gz
 
-          # Stop existing container
-          docker stop $IMAGE_NAME || true
-          docker rm $IMAGE_NAME || true
-
-          # Ensure uploads directory has correct permissions before mounting
-          chmod -R 777 $DEPLOY_DIR/uploads || true
+          cd $DEPLOY_DIR
           
-          # Run new container
-          docker run -d \
-            --name $IMAGE_NAME \
-            --restart unless-stopped \
-            -p $HOST_PORT:$CONTAINER_PORT \
-            -v $DEPLOY_DIR/uploads:/app/wwwroot/uploads \
-            -e ASPNETCORE_ENVIRONMENT=Production \
-            -e ConnectionStrings__DefaultConnection="$DB_CONNECTION_STRING" \
-            -e ASPNETCORE_URLS=http://+:$CONTAINER_PORT \
-            $IMAGE_NAME:latest
+          # Stop and remove old containers
+          docker-compose down || true
+
+          # Ensure uploads directory has correct permissions
+          mkdir -p wwwroot/uploads
+          chmod -R 777 wwwroot/uploads || true
+          
+          # Start new containers using docker-compose (with loaded image)
+          # Use image from tar.gz instead of building
+          IMAGE_TAG="$IMAGE_NAME:latest"
+          docker-compose up -d --no-build || docker-compose up -d
           
           # Verify permissions after container start
           echo "Checking uploads directory permissions:"
-          docker exec $IMAGE_NAME ls -ld /app/wwwroot/uploads || echo "Cannot check permissions inside container"
+          docker-compose exec -T backend ls -ld /app/wwwroot/uploads || echo "Cannot check permissions inside container"
 
           # Clean up old images
           docker image prune -f
 
           echo "=== Deployment successful ==="
       env:
-        DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
-        CONTAINER_PORT: ${{ env.CONTAINER_PORT }}
-        HOST_PORT: ${{ env.HOST_PORT }}
         IMAGE_NAME: ${{ env.IMAGE_NAME }}
         DEPLOY_DIR: ${{ env.DEPLOY_DIR }}
 
@@ -235,5 +263,21 @@ jobs:
           curl -f http://localhost:${{ env.HOST_PORT }}/api/products || echo "API health check failed"
           echo ""
           echo "Uploads directory:"
-          docker exec ${{ env.IMAGE_NAME }} ls -la /app/wwwroot/uploads/ || echo "Could not list uploads"
+          cd ${{ env.DEPLOY_DIR }}
+          docker-compose exec -T backend ls -la /app/wwwroot/uploads/ || docker exec ${{ env.IMAGE_NAME }} ls -la /app/wwwroot/uploads/ || echo "Could not list uploads"
+          echo ""
+          echo "Checking Telegram token configuration:"
+          if docker-compose exec -T backend env | grep -q "TelegramBot__Token="; then
+            echo "✅ Telegram token is configured"
+            docker-compose exec -T backend env | grep "TelegramBot__Token" | sed 's/TelegramBot__Token=.*/TelegramBot__Token=***HIDDEN***/'
+          else
+            echo "⚠️ Warning: Telegram token might not be configured"
+          fi
+          echo ""
+          echo "Checking .env file:"
+          if [ -f .env ] && grep -q "TELEGRAM_BOT_TOKEN=" .env && grep -q "DB_CONNECTION_STRING=" .env; then
+            echo "✅ .env file is properly configured"
+          else
+            echo "⚠️ Warning: .env file might be missing or incomplete"
+          fi
           echo "=== Verification completed ==="
