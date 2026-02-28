@@ -19,6 +19,7 @@ public class TelegramNotificationService : ITelegramNotificationService
     private readonly IWebHostEnvironment _environment;
     private readonly string _botToken;
     private readonly string _botApiUrl;
+    private readonly string? _channelId;
 
     public TelegramNotificationService(
         HttpClient httpClient,
@@ -41,9 +42,11 @@ public class TelegramNotificationService : ITelegramNotificationService
         
         _botToken = tokenFromConfig;
         _botApiUrl = $"https://api.telegram.org/bot{_botToken}";
+        _channelId = configuration["TelegramBot:ChannelId"];
         
         // Log token presence (but not the actual token for security)
-        _logger.LogInformation("TelegramNotificationService initialized. Bot token configured: {TokenPresent}", !string.IsNullOrEmpty(_botToken));
+        _logger.LogInformation("TelegramNotificationService initialized. Bot token configured: {TokenPresent}, Channel ID configured: {ChannelIdPresent}", 
+            !string.IsNullOrEmpty(_botToken), !string.IsNullOrEmpty(_channelId));
     }
 
     /// <summary>
@@ -267,6 +270,64 @@ public class TelegramNotificationService : ITelegramNotificationService
 
         _logger.LogInformation("Broadcast message with photos sent. Success: {SuccessCount}, Failed: {FailCount}", successCount, failCount);
         return successCount;
+    }
+
+    /// <summary>
+    /// Sends a message to a Telegram channel
+    /// </summary>
+    public async Task<bool> SendMessageToChannelAsync(string message)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_botToken))
+            {
+                _logger.LogError("Cannot send message to channel: Bot token is empty");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_channelId))
+            {
+                _logger.LogWarning("Cannot send message to channel: Channel ID is not configured");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                _logger.LogWarning("Attempted to send empty message to channel");
+                return false;
+            }
+
+            var url = $"{_botApiUrl}/sendMessage";
+            _logger.LogDebug("Sending message to Telegram channel: {Url} (channelId: {ChannelId})", 
+                url.Replace(_botToken, "***"), _channelId);
+            
+            var payload = new
+            {
+                chat_id = _channelId,
+                text = message,
+                parse_mode = "HTML"
+            };
+
+            var response = await _httpClient.PostAsJsonAsync(url, payload);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Message sent successfully to channel {ChannelId}", _channelId);
+                return true;
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("Failed to send message to channel {ChannelId}. Status: {Status}, URL: {Url}, Error: {Error}", 
+                    _channelId, response.StatusCode, url.Replace(_botToken, "***"), errorContent);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Exception while sending message to channel {ChannelId}", _channelId);
+            return false;
+        }
     }
 }
 

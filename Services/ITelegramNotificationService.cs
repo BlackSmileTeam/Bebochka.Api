@@ -36,5 +36,12 @@ public interface ITelegramNotificationService
     /// <param name="photoPaths">List of photo paths to send</param>
     /// <returns>Number of users who received the message</returns>
     Task<int> SendBroadcastWithPhotosAsync(string message, List<string> photoPaths);
+    
+    /// <summary>
+    /// Sends a message to a Telegram channel
+    /// </summary>
+    /// <param name="message">Message text to send</param>
+    /// <returns>True if message was sent successfully</returns>
+    Task<bool> SendMessageToChannelAsync(string message);
 }
 

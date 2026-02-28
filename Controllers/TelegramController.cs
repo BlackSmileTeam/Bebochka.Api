@@ -197,6 +197,43 @@ public class TelegramController : ControllerBase
             return StatusCode(500, new { message = "Error sending message", error = ex.Message });
         }
     }
+
+    /// <summary>
+    /// Sends a message to the Telegram channel
+    /// </summary>
+    /// <param name="request">Message request</param>
+    /// <returns>Result indicating success or failure</returns>
+    /// <response code="200">Message sent successfully</response>
+    /// <response code="400">Invalid request</response>
+    /// <response code="401">Unauthorized</response>
+    [HttpPost("channel/send")]
+    [Authorize]
+    [ProducesResponseType(typeof(SendMessageResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<SendMessageResponseDto>> SendMessageToChannel([FromBody] SendMessageRequestDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Message))
+        {
+            return BadRequest(new { message = "Message text is required" });
+        }
+
+        try
+        {
+            var success = await _telegramService.SendMessageToChannelAsync(request.Message);
+            
+            return Ok(new SendMessageResponseDto
+            {
+                Success = success,
+                Message = success ? "Message sent successfully to channel" : "Failed to send message to channel"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending message to channel");
+            return StatusCode(500, new { message = "Error sending message to channel", error = ex.Message });
+        }
+    }
 }
 
 /// <summary>
