@@ -12,6 +12,9 @@ using Microsoft.AspNetCore.Http;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Add User Secrets for local development
+builder.Configuration.AddUserSecrets(typeof(Program).Assembly);
+
 // Configure Kestrel
 builder.WebHost.ConfigureKestrel(options =>
 {
