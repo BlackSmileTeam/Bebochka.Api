@@ -138,6 +138,21 @@ jobs:
         name: docker-image
         path: .
 
+    - name: Verify files exist before copying
+      run: |
+        echo "Checking files to copy..."
+        ls -la docker-compose.yml Dockerfile || exit 1
+        test -f docker-compose.yml || exit 1
+        test -f Dockerfile || exit 1
+        echo "✅ All files exist"
+        
+    - name: Verify Docker image exists
+      run: |
+        echo "Checking Docker image..."
+        ls -lh ${{ env.IMAGE_NAME }}.tar.gz || exit 1
+        test -f ${{ env.IMAGE_NAME }}.tar.gz || exit 1
+        echo "✅ Docker image exists"
+
     - name: Prepare deployment directory
       uses: appleboy/ssh-action@v1
       with:
@@ -150,32 +165,6 @@ jobs:
           mkdir -p ${{ env.DEPLOY_DIR }}/logs
           chmod 777 ${{ env.DEPLOY_DIR }}/uploads
           echo "Uploads directory created with permissions: $(ls -ld ${{ env.DEPLOY_DIR }}/uploads)"
-
-    - name: Verify Docker image exists
-      run: |
-        echo "Checking Docker image..."
-        ls -lh ${{ env.IMAGE_NAME }}.tar.gz || exit 1
-        test -f ${{ env.IMAGE_NAME }}.tar.gz || exit 1
-        echo "✅ Docker image exists"
-        
-    - name: Copy Docker image to server
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ env.SSH_PORT }}
-        source: "${{ env.IMAGE_NAME }}.tar.gz"
-        target: "/tmp"
-        overwrite: true
-
-    - name: Verify files exist before copying
-      run: |
-        echo "Checking files to copy..."
-        ls -la docker-compose.yml Dockerfile || exit 1
-        test -f docker-compose.yml || exit 1
-        test -f Dockerfile || exit 1
-        echo "✅ All files exist"
         
     - name: Copy docker-compose.yml and Dockerfile to server
       uses: appleboy/scp-action@v0.1.7
@@ -186,6 +175,17 @@ jobs:
         port: ${{ env.SSH_PORT }}
         source: "docker-compose.yml,Dockerfile"
         target: "${{ env.DEPLOY_DIR }}"
+        overwrite: true
+
+    - name: Copy Docker image to server
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ env.SSH_PORT }}
+        source: "${{ env.IMAGE_NAME }}.tar.gz"
+        target: "/tmp"
         overwrite: true
 
     - name: Create .env file on server
