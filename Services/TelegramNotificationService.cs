@@ -614,12 +614,20 @@ public class TelegramNotificationService : ITelegramNotificationService
             };
 
             _context.TelegramErrors.Add(error);
-            await _context.SaveChangesAsync();
+            var savedCount = await _context.SaveChangesAsync();
+            _logger.LogInformation("Telegram error saved to database. Saved count: {Count}, Error ID: {ErrorId}", savedCount, error.Id);
+        }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx)
+        {
+            // Table might not exist or other DB issue
+            _logger.LogError(dbEx, "Failed to save error to database (DbUpdateException). Error: {Message}. Inner: {InnerException}", 
+                dbEx.Message, dbEx.InnerException?.Message);
         }
         catch (Exception saveEx)
         {
-            // If we can't save the error, just log it
-            _logger.LogError(saveEx, "Failed to save error to database");
+            // If we can't save the error, log it with full details
+            _logger.LogError(saveEx, "Failed to save error to database. Exception type: {Type}, Message: {Message}, StackTrace: {StackTrace}", 
+                saveEx.GetType().Name, saveEx.Message, saveEx.StackTrace);
         }
     }
 
