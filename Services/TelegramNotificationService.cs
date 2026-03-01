@@ -293,7 +293,7 @@ public class TelegramNotificationService : ITelegramNotificationService
 
             if (string.IsNullOrWhiteSpace(_channelId))
             {
-                _logger.LogWarning("Cannot send message to channel: Channel ID is not configured");
+                _logger.LogError("Cannot send message to channel: Channel ID is not configured. Please set TelegramBot__ChannelId environment variable or TelegramBot:ChannelId in appsettings.json");
                 return false;
             }
 
@@ -351,7 +351,7 @@ public class TelegramNotificationService : ITelegramNotificationService
 
             if (string.IsNullOrWhiteSpace(_channelId))
             {
-                _logger.LogWarning("Cannot send message to channel: Channel ID is not configured");
+                _logger.LogError("Cannot send message to channel: Channel ID is not configured. Please set TelegramBot__ChannelId environment variable or TelegramBot:ChannelId in appsettings.json");
                 return false;
             }
 
