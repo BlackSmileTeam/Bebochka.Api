@@ -357,25 +357,39 @@ public class TelegramNotificationService : ITelegramNotificationService
 
             // Скачиваем изображения
             var images = new List<(byte[] Bytes, string Extension)>();
+            _logger.LogInformation("Starting to download {Count} images for channel message", imageUrls.Count);
+            
             foreach (var imageUrl in imageUrls)
             {
                 try
                 {
+                    _logger.LogDebug("Downloading image from {ImageUrl}", imageUrl);
                     var imageResponse = await _httpClient.GetAsync(imageUrl);
+                    
                     if (imageResponse.IsSuccessStatusCode)
                     {
                         var imageBytes = await imageResponse.Content.ReadAsByteArrayAsync();
                         var extension = System.IO.Path.GetExtension(new Uri(imageUrl).AbsolutePath);
                         if (string.IsNullOrEmpty(extension))
                             extension = ".jpg";
+                        
+                        _logger.LogDebug("Successfully downloaded image: {Size} bytes, extension: {Extension}", 
+                            imageBytes.Length, extension);
                         images.Add((imageBytes, extension));
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Failed to download image from {ImageUrl}. Status: {Status}", 
+                            imageUrl, imageResponse.StatusCode);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to download image from {ImageUrl}", imageUrl);
+                    _logger.LogWarning(ex, "Exception while downloading image from {ImageUrl}", imageUrl);
                 }
             }
+            
+            _logger.LogInformation("Downloaded {Count} images out of {Total}", images.Count, imageUrls.Count);
 
             if (images.Count == 0)
             {
