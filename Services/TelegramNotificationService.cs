@@ -307,6 +307,11 @@ public class TelegramNotificationService : ITelegramNotificationService
                 return false;
             }
 
+            // Log message details for debugging
+            var messagePreview = message.Length > 200 ? message.Substring(0, 200) + "..." : message;
+            _logger.LogInformation("Sending message to channel {ChannelId}. Message preview: {MessagePreview}", 
+                _channelId, messagePreview);
+
             var url = $"{_botApiUrl}/sendMessage";
             _logger.LogDebug("Sending message to Telegram channel: {Url} (channelId: {ChannelId})", 
                 url.Replace(_botToken, "***"), _channelId);
@@ -334,7 +339,8 @@ public class TelegramNotificationService : ITelegramNotificationService
             
             if (response.IsSuccessStatusCode)
             {
-                _logger.LogDebug("Message sent successfully to channel {ChannelId}", _channelId);
+                _logger.LogInformation("Message sent successfully to channel {ChannelId}. Full message: {Message}", 
+                    _channelId, message);
                 return true;
             }
             else
@@ -383,6 +389,11 @@ public class TelegramNotificationService : ITelegramNotificationService
                 return await SendMessageToChannelAsync(message);
             }
 
+            // Log message details for debugging
+            var messagePreview = message.Length > 200 ? message.Substring(0, 200) + "..." : message;
+            _logger.LogInformation("Sending message with {Count} images to channel {ChannelId}. Message preview: {MessagePreview}", 
+                imageUrls.Count, _channelId, messagePreview);
+            
             // Скачиваем изображения параллельно для ускорения
             _logger.LogInformation("Starting to download {Count} images for channel message", imageUrls.Count);
             
@@ -452,7 +463,9 @@ public class TelegramNotificationService : ITelegramNotificationService
                         content.Add(new StringContent("HTML"), "parse_mode");
                     }
 
-                    _logger.LogInformation("Sending photo to channel {ChannelId}", _channelId);
+                    var captionPreview = message.Length > 100 ? message.Substring(0, 100) + "..." : message;
+                    _logger.LogInformation("Sending photo to channel {ChannelId} with caption: {CaptionPreview}", 
+                        _channelId, captionPreview);
                     var response = await ExecuteWithRetryAsync(
                         async (ct) => await _httpClient.PostAsync(url, content, ct),
                         $"Send photo to channel {_channelId}",
@@ -461,7 +474,8 @@ public class TelegramNotificationService : ITelegramNotificationService
                     
                     if (response.IsSuccessStatusCode)
                     {
-                        _logger.LogInformation("Photo sent successfully to channel {ChannelId}", _channelId);
+                        _logger.LogInformation("Photo sent successfully to channel {ChannelId}. Caption: {Caption}", 
+                            _channelId, message ?? "No caption");
                         return true;
                     }
                     else
@@ -539,7 +553,9 @@ public class TelegramNotificationService : ITelegramNotificationService
 
             try
             {
-                _logger.LogInformation("Sending media group with {Count} photos to channel {ChannelId}", images.Count, _channelId);
+                var captionPreview = message?.Length > 100 ? message.Substring(0, 100) + "..." : message ?? "No caption";
+                _logger.LogInformation("Sending media group with {Count} photos to channel {ChannelId}. Caption preview: {CaptionPreview}", 
+                    images.Count, _channelId, captionPreview);
                 var mediaResponse = await ExecuteWithRetryAsync(
                     async (ct) => await _httpClient.PostAsync(mediaGroupUrl, mediaContent, ct),
                     $"Send media group to channel {_channelId}",
@@ -548,7 +564,8 @@ public class TelegramNotificationService : ITelegramNotificationService
                 
                 if (mediaResponse.IsSuccessStatusCode)
                 {
-                    _logger.LogInformation("Media group sent successfully to channel {ChannelId}", _channelId);
+                    _logger.LogInformation("Media group sent successfully to channel {ChannelId}. Caption: {Caption}", 
+                        _channelId, message ?? "No caption");
                     return true;
                 }
                 else
