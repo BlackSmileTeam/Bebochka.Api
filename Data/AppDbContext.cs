@@ -156,10 +156,10 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<TelegramError>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Message).IsRequired().HasMaxLength(1000);
-            entity.Property(e => e.Details).HasMaxLength(5000);
+            entity.Property(e => e.Message).IsRequired().HasMaxLength(2000);
+            entity.Property(e => e.Details).HasColumnType("TEXT"); // Use TEXT for larger error details
             entity.Property(e => e.ErrorType).IsRequired().HasMaxLength(100);
-            entity.Property(e => e.ProductInfo).HasMaxLength(500);
+            entity.Property(e => e.ProductInfo).HasMaxLength(1000);
             entity.Property(e => e.ChannelId).HasMaxLength(100);
             entity.Property(e => e.ErrorDate).IsRequired();
             entity.HasIndex(e => e.ErrorDate);

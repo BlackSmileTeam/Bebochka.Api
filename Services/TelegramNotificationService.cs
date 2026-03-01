@@ -631,32 +631,119 @@ public class TelegramNotificationService : ITelegramNotificationService
     }
 
     /// <summary>
-    /// Saves error to database for later analysis
+    /// Saves error to database for later analysis with detailed information
     /// </summary>
     private async Task SaveErrorToDatabase(Exception ex, string? message, int imageCount, string? errorType)
     {
         try
         {
+            // Get the calling method name and class from stack trace
+            var stackTrace = new System.Diagnostics.StackTrace(ex, true);
+            var frame = stackTrace.GetFrame(0);
+            string? sourceLocation = null;
+            if (frame != null)
+            {
+                var method = frame.GetMethod();
+                if (method != null)
+                {
+                    sourceLocation = $"{method.DeclaringType?.FullName}.{method.Name}";
+                    var fileName = frame.GetFileName();
+                    var lineNumber = frame.GetFileLineNumber();
+                    if (!string.IsNullOrEmpty(fileName) && lineNumber > 0)
+                    {
+                        sourceLocation += $" at {System.IO.Path.GetFileName(fileName)}:{lineNumber}";
+                    }
+                }
+            }
+
+            // Build detailed error message
+            var errorMessage = new System.Text.StringBuilder();
+            errorMessage.AppendLine($"Error Type: {ex.GetType().FullName}");
+            errorMessage.AppendLine($"Error Message: {ex.Message}");
+            if (!string.IsNullOrEmpty(sourceLocation))
+            {
+                errorMessage.AppendLine($"Location: {sourceLocation}");
+            }
+            if (ex.InnerException != null)
+            {
+                errorMessage.AppendLine($"Inner Exception Type: {ex.InnerException.GetType().FullName}");
+                errorMessage.AppendLine($"Inner Exception Message: {ex.InnerException.Message}");
+            }
+            if (ex is System.Net.Http.HttpRequestException httpEx)
+            {
+                errorMessage.AppendLine($"HTTP Request Error: {httpEx.Message}");
+            }
+            if (ex is TaskCanceledException tce)
+            {
+                errorMessage.AppendLine($"Task Cancelled: {tce.Message}");
+                if (tce.InnerException != null)
+                {
+                    errorMessage.AppendLine($"Inner: {tce.InnerException.GetType().Name}: {tce.InnerException.Message}");
+                }
+            }
+
+            // Build detailed error information
+            var details = new System.Text.StringBuilder();
+            details.AppendLine("=== ERROR DETAILS ===");
+            details.AppendLine($"Timestamp: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff} UTC");
+            details.AppendLine($"Error Type: {ex.GetType().FullName}");
+            details.AppendLine($"Error Message: {ex.Message}");
+            if (!string.IsNullOrEmpty(sourceLocation))
+            {
+                details.AppendLine($"Source Location: {sourceLocation}");
+            }
+            details.AppendLine($"Channel ID: {_channelId ?? "Not configured"}");
+            details.AppendLine($"Image Count: {imageCount}");
+            if (!string.IsNullOrEmpty(message))
+            {
+                var messagePreview = message.Length > 200 ? message.Substring(0, 200) + "..." : message;
+                details.AppendLine($"Product Message Preview: {messagePreview}");
+            }
+            
+            // Add inner exception details
+            if (ex.InnerException != null)
+            {
+                details.AppendLine();
+                details.AppendLine("=== INNER EXCEPTION ===");
+                details.AppendLine($"Type: {ex.InnerException.GetType().FullName}");
+                details.AppendLine($"Message: {ex.InnerException.Message}");
+                if (!string.IsNullOrEmpty(ex.InnerException.StackTrace))
+                {
+                    details.AppendLine($"StackTrace: {ex.InnerException.StackTrace}");
+                }
+            }
+            
+            // Add full stack trace
+            details.AppendLine();
+            details.AppendLine("=== FULL STACK TRACE ===");
+            details.AppendLine(ex.StackTrace ?? "No stack trace available");
+            
+            // Add exception string representation
+            details.AppendLine();
+            details.AppendLine("=== EXCEPTION TO STRING ===");
+            details.AppendLine(ex.ToString());
+
             var error = new TelegramError
             {
                 ErrorDate = DateTime.UtcNow,
-                Message = ex.Message.Length > 1000 ? ex.Message.Substring(0, 1000) : ex.Message,
-                Details = ex.ToString().Length > 5000 ? ex.ToString().Substring(0, 5000) : ex.ToString(),
+                Message = errorMessage.ToString().Length > 2000 ? errorMessage.ToString().Substring(0, 2000) : errorMessage.ToString(),
+                Details = details.ToString(), // TEXT field can hold up to 65KB
                 ErrorType = errorType ?? (ex is TaskCanceledException ? "Timeout" : ex.GetType().Name),
                 ImageCount = imageCount > 0 ? imageCount : null,
                 ChannelId = _channelId,
-                ProductInfo = message?.Length > 500 ? message.Substring(0, 500) : message
+                ProductInfo = message?.Length > 1000 ? message.Substring(0, 1000) : message
             };
 
             _context.TelegramErrors.Add(error);
             var savedCount = await _context.SaveChangesAsync();
-            _logger.LogInformation("Telegram error saved to database. Saved count: {Count}, Error ID: {ErrorId}", savedCount, error.Id);
+            _logger.LogInformation("Telegram error saved to database. Error ID: {ErrorId}, Type: {Type}, Location: {Location}", 
+                error.Id, error.ErrorType, sourceLocation ?? "Unknown");
         }
         catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx)
         {
             // Table might not exist or other DB issue
-            _logger.LogError(dbEx, "Failed to save error to database (DbUpdateException). Error: {Message}. Inner: {InnerException}", 
-                dbEx.Message, dbEx.InnerException?.Message);
+            _logger.LogError(dbEx, "Failed to save error to database (DbUpdateException). Error: {Message}. Inner: {InnerException}. StackTrace: {StackTrace}", 
+                dbEx.Message, dbEx.InnerException?.Message, dbEx.StackTrace);
         }
         catch (Exception saveEx)
         {
