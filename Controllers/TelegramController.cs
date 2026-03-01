@@ -9,6 +9,79 @@ using Bebochka.Api.Models;
 namespace Bebochka.Api.Controllers;
 
 /// <summary>
+/// Request DTO for sending products to channel
+/// </summary>
+public class SendProductsToChannelRequestDto
+{
+    /// <summary>
+    /// Gets or sets the list of product IDs to send
+    /// </summary>
+    public List<int> ProductIds { get; set; } = new();
+}
+
+/// <summary>
+/// Result for a single product send operation
+/// </summary>
+public class ProductSendResult
+{
+    /// <summary>
+    /// Gets or sets the product ID
+    /// </summary>
+    public int ProductId { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the product name
+    /// </summary>
+    public string ProductName { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Gets or sets whether the send was successful
+    /// </summary>
+    public bool Success { get; set; }
+    
+    /// <summary>
+    /// Gets or sets error message if send failed
+    /// </summary>
+    public string? ErrorMessage { get; set; }
+}
+
+/// <summary>
+/// Response DTO for sending products to channel
+/// </summary>
+public class SendProductsToChannelResponseDto
+{
+    /// <summary>
+    /// Gets or sets whether all products were sent successfully
+    /// </summary>
+    public bool Success { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the number of successfully sent products
+    /// </summary>
+    public int SuccessCount { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the number of failed products
+    /// </summary>
+    public int FailCount { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the total number of products
+    /// </summary>
+    public int TotalCount { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the results for each product
+    /// </summary>
+    public List<ProductSendResult> Results { get; set; } = new();
+    
+    /// <summary>
+    /// Gets or sets the response message
+    /// </summary>
+    public string Message { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// Controller for sending messages via Telegram bot
 /// </summary>
 [ApiController]
@@ -455,4 +528,3 @@ public class SendMessageResponseDto
     /// </summary>
     public string Message { get; set; } = string.Empty;
 }
-
