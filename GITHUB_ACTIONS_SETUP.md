@@ -19,6 +19,7 @@
 4. **SSH_PORT** - порт SSH (опционально, по умолчанию 22)
 5. **DB_CONNECTION_STRING** - строка подключения к MySQL
 6. **TELEGRAM_BOT_TOKEN** - токен Telegram бота
+7. **TELEGRAM_BOT_CHANNEL_ID** - ID или username Telegram канала (например: `@bebochkaTest` или `-1001234567890`)
 
 ## Как работает workflow
 
@@ -108,6 +109,7 @@ Workflow запускается автоматически при:
     cat > .env << EOF
     DB_CONNECTION_STRING=${{ secrets.DB_CONNECTION_STRING }}
     TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+    TELEGRAM_BOT_CHANNEL_ID=${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}
     НОВАЯ_ПЕРЕМЕННАЯ=${{ secrets.НОВЫЙ_СЕКРЕТ }}
     EOF
 ```
