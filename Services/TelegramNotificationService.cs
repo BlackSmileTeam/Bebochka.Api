@@ -329,5 +329,134 @@ public class TelegramNotificationService : ITelegramNotificationService
             return false;
         }
     }
+
+    /// <summary>
+    /// Sends a message with photos to a Telegram channel
+    /// </summary>
+    public async Task<bool> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_botToken))
+            {
+                _logger.LogError("Cannot send message to channel: Bot token is empty");
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(_channelId))
+            {
+                _logger.LogWarning("Cannot send message to channel: Channel ID is not configured");
+                return false;
+            }
+
+            if (imageUrls == null || imageUrls.Count == 0)
+            {
+                // Если нет изображений, отправляем только текст
+                return await SendMessageToChannelAsync(message);
+            }
+
+            // Скачиваем изображения
+            var images = new List<(byte[] Bytes, string Extension)>();
+            foreach (var imageUrl in imageUrls)
+            {
+                try
+                {
+                    var imageResponse = await _httpClient.GetAsync(imageUrl);
+                    if (imageResponse.IsSuccessStatusCode)
+                    {
+                        var imageBytes = await imageResponse.Content.ReadAsByteArrayAsync();
+                        var extension = System.IO.Path.GetExtension(new Uri(imageUrl).AbsolutePath);
+                        if (string.IsNullOrEmpty(extension))
+                            extension = ".jpg";
+                        images.Add((imageBytes, extension));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to download image from {ImageUrl}", imageUrl);
+                }
+            }
+
+            if (images.Count == 0)
+            {
+                // Если не удалось скачать изображения, отправляем только текст
+                return await SendMessageToChannelAsync(message);
+            }
+
+            // Если одно изображение, отправляем через sendPhoto
+            if (images.Count == 1)
+            {
+                var url = $"{_botApiUrl}/sendPhoto";
+                using var content = new MultipartFormDataContent();
+                content.Add(new StringContent(_channelId), "chat_id");
+                content.Add(new ByteArrayContent(images[0].Bytes), "photo", $"photo{images[0].Extension}");
+                if (!string.IsNullOrWhiteSpace(message))
+                {
+                    content.Add(new StringContent(message), "caption");
+                    content.Add(new StringContent("HTML"), "parse_mode");
+                }
+
+                var response = await _httpClient.PostAsync(url, content);
+                return response.IsSuccessStatusCode;
+            }
+
+            // Если несколько изображений, отправляем через sendMediaGroup
+            var mediaGroupUrl = $"{_botApiUrl}/sendMediaGroup";
+            using var mediaContent = new MultipartFormDataContent();
+            mediaContent.Add(new StringContent(_channelId), "chat_id");
+
+            // Формируем массив media объектов
+            var mediaArray = new List<object>();
+            for (int i = 0; i < images.Count; i++)
+            {
+                var mediaObj = new Dictionary<string, string>
+                {
+                    { "type", "photo" },
+                    { "media", $"attach://photo_{i}" }
+                };
+                
+                // Добавляем caption только к последнему фото
+                if (i == images.Count - 1 && !string.IsNullOrWhiteSpace(message))
+                {
+                    mediaObj["caption"] = message;
+                    mediaObj["parse_mode"] = "HTML";
+                }
+                
+                mediaArray.Add(mediaObj);
+            }
+
+            // Добавляем media как JSON массив
+            var mediaJson = System.Text.Json.JsonSerializer.Serialize(mediaArray);
+            mediaContent.Add(new StringContent(mediaJson), "media");
+
+            // Добавляем файлы
+            for (int i = 0; i < images.Count; i++)
+            {
+                var fileContent = new ByteArrayContent(images[i].Bytes);
+                fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+                mediaContent.Add(fileContent, $"photo_{i}", $"photo_{i}{images[i].Extension}");
+            }
+
+            var mediaResponse = await _httpClient.PostAsync(mediaGroupUrl, mediaContent);
+            if (mediaResponse.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Media group sent successfully to channel {ChannelId}", _channelId);
+                return true;
+            }
+            else
+            {
+                var errorContent = await mediaResponse.Content.ReadAsStringAsync();
+                _logger.LogWarning("Failed to send media group to channel {ChannelId}. Status: {Status}, Error: {Error}", 
+                    _channelId, mediaResponse.StatusCode, errorContent);
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Exception while sending message with photos to channel {ChannelId}", _channelId);
+            // В случае ошибки пытаемся отправить только текст
+            return await SendMessageToChannelAsync(message);
+        }
+    }
 }
 

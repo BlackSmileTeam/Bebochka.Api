@@ -220,7 +220,15 @@ public class TelegramController : ControllerBase
 
         try
         {
-            var success = await _telegramService.SendMessageToChannelAsync(request.Message);
+            bool success;
+            if (request.ImageUrls != null && request.ImageUrls.Count > 0)
+            {
+                success = await _telegramService.SendMessageToChannelWithPhotosAsync(request.Message, request.ImageUrls);
+            }
+            else
+            {
+                success = await _telegramService.SendMessageToChannelAsync(request.Message);
+            }
             
             return Ok(new SendMessageResponseDto
             {
@@ -277,6 +285,11 @@ public class SendMessageRequestDto
     /// Gets or sets the message text to send
     /// </summary>
     public string Message { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Gets or sets the list of image URLs to send with the message
+    /// </summary>
+    public List<string>? ImageUrls { get; set; }
 }
 
 /// <summary>
