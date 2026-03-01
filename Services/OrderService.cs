@@ -104,7 +104,13 @@ public class OrderService : IOrderService
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
 
-        return orders.Select(MapToDto).ToList();
+        // Загружаем информацию о пользователях для заказов
+        var userIds = orders.Where(o => o.UserId.HasValue).Select(o => o.UserId!.Value).Distinct().ToList();
+        var users = await _context.Users
+            .Where(u => userIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u);
+
+        return orders.Select(o => MapToDto(o, users.GetValueOrDefault(o.UserId ?? 0))).ToList();
     }
 
     public async Task<OrderDto?> GetOrderByIdAsync(int id)
@@ -113,7 +119,16 @@ public class OrderService : IOrderService
             .Include(o => o.OrderItems)
             .FirstOrDefaultAsync(o => o.Id == id);
 
-        return order == null ? null : MapToDto(order);
+        if (order == null)
+            return null;
+
+        User? user = null;
+        if (order.UserId.HasValue)
+        {
+            user = await _context.Users.FirstOrDefaultAsync(u => u.Id == order.UserId.Value);
+        }
+
+        return MapToDto(order, user);
     }
 
     public async Task<List<OrderDto>> GetUserOrdersAsync(int userId)
@@ -124,7 +139,9 @@ public class OrderService : IOrderService
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
 
-        return orders.Select(MapToDto).ToList();
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+
+        return orders.Select(o => MapToDto(o, user)).ToList();
     }
 
     public async Task<bool> CancelOrderAsync(int orderId, string? reason = null)
@@ -197,7 +214,7 @@ public class OrderService : IOrderService
         };
     }
 
-    private static OrderDto MapToDto(Order order)
+    private static OrderDto MapToDto(Order order, User? user = null)
     {
         return new OrderDto
         {
@@ -220,7 +237,12 @@ public class OrderService : IOrderService
                 Quantity = oi.Quantity
             }).ToList(),
             CreatedAt = order.CreatedAt,
-            UpdatedAt = order.UpdatedAt
+            UpdatedAt = order.UpdatedAt,
+            CancelledAt = order.CancelledAt,
+            CancellationReason = order.CancellationReason,
+            UserId = order.UserId,
+            TelegramUserId = user?.TelegramUserId,
+            TelegramUsername = user?.FullName // Используем FullName как имя пользователя для отображения
         };
     }
 }

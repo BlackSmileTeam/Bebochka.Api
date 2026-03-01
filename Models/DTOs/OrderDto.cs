@@ -20,6 +20,9 @@ public class OrderDto
     public DateTime UpdatedAt { get; set; }
     public DateTime? CancelledAt { get; set; }
     public string? CancellationReason { get; set; }
+    public int? UserId { get; set; }
+    public long? TelegramUserId { get; set; }
+    public string? TelegramUsername { get; set; }
 }
 
 /// <summary>
