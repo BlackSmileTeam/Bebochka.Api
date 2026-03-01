@@ -29,15 +29,11 @@ jobs:
         echo "Docker image saved to /tmp/docker-images/bebochka-backend.tar.gz"
         ls -lh /tmp/docker-images/
         
-    - name: Create .env file
+    - name: Verify files exist
       run: |
-        cat > .env << EOF
-        DB_CONNECTION_STRING=${{ secrets.DB_CONNECTION_STRING }}
-        TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
-        TELEGRAM_BOT_CHANNEL_ID=${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}
-        EOF
-        echo ".env file created"
-        cat .env | sed 's/\(TELEGRAM_BOT_TOKEN=\).*/\1***/' | sed 's/\(DB_CONNECTION_STRING=.*Password=\).*\(;.*\)/\1***\2/'
+        echo "Checking files..."
+        ls -la docker-compose.yml Dockerfile || exit 1
+        test -f .env && echo ".env exists" || echo ".env will be created on server"
         
     - name: Copy files to server
       uses: appleboy/scp-action@v0.1.7
@@ -46,9 +42,16 @@ jobs:
         username: ${{ secrets.SSH_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: ${{ secrets.SSH_PORT || 22 }}
-        source: "docker-compose.yml,Dockerfile,.env"
+        source: "docker-compose.yml,Dockerfile"
         target: "/root/bebochka-backend"
         strip_components: 0
+        overwrite: true
+        
+    - name: Verify Docker image exists
+      run: |
+        echo "Checking Docker image..."
+        ls -lh /tmp/docker-images/bebochka-backend.tar.gz || exit 1
+        test -f /tmp/docker-images/bebochka-backend.tar.gz || exit 1
         
     - name: Copy Docker image to server
       uses: appleboy/scp-action@v0.1.7
@@ -60,8 +63,9 @@ jobs:
         source: "/tmp/docker-images/bebochka-backend.tar.gz"
         target: "/tmp"
         strip_components: 0
+        overwrite: true
         
-    - name: Load Docker image and deploy
+    - name: Create .env file on server and deploy
       uses: appleboy/ssh-action@v1.0.3
       with:
         host: ${{ secrets.SSH_HOST }}
@@ -71,9 +75,34 @@ jobs:
         script: |
           cd /root/bebochka-backend
           
+          # Create .env file
+          echo "Creating .env file..."
+          cat > .env << EOF
+          DB_CONNECTION_STRING=${{ secrets.DB_CONNECTION_STRING }}
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_CHANNEL_ID=${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}
+          EOF
+          
+          # Verify .env file was created
+          if [ ! -f .env ]; then
+            echo "❌ Failed to create .env file"
+            exit 1
+          fi
+          echo "✅ .env file created"
+          
+          # Verify Docker image exists
+          if [ ! -f /tmp/bebochka-backend.tar.gz ]; then
+            echo "❌ Docker image not found at /tmp/bebochka-backend.tar.gz"
+            exit 1
+          fi
+          
           # Load Docker image
           echo "Loading Docker image..."
-          docker load < /tmp/bebochka-backend.tar.gz
+          docker load < /tmp/bebochka-backend.tar.gz || {
+            echo "❌ Failed to load Docker image"
+            exit 1
+          }
+          echo "✅ Docker image loaded"
           
           # Create wwwroot/uploads directory if it doesn't exist
           mkdir -p wwwroot/uploads
@@ -84,10 +113,15 @@ jobs:
           
           # Start new containers
           echo "Starting new containers..."
-          docker-compose up -d
+          docker-compose up -d || {
+            echo "❌ Failed to start containers"
+            docker-compose logs
+            exit 1
+          }
           
           # Wait for container to start
-          sleep 5
+          echo "Waiting for container to start..."
+          sleep 10
           
           # Verify deployment
           echo "Verifying deployment..."
@@ -110,4 +144,4 @@ jobs:
           
           # Verify Telegram configuration
           echo "Checking Telegram configuration..."
-          docker-compose logs backend | grep -i "telegram\|channel" | tail -5 || echo "No Telegram logs found"
+          docker-compose logs backend | grep -i "telegram\|channel" | tail -10 || echo "No Telegram logs found"
