@@ -6,6 +6,7 @@ using Bebochka.Api.Models.DTOs;
 using Bebochka.Api.Data;
 using Bebochka.Api.Models;
 using System.Linq;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Bebochka.Api.Controllers;
 
@@ -83,6 +84,27 @@ public class SendProductsToChannelResponseDto
 }
 
 /// <summary>
+/// Response DTO for checking send status
+/// </summary>
+public class SendStatusResponseDto
+{
+    /// <summary>
+    /// Gets or sets the total number of products
+    /// </summary>
+    public int TotalCount { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the number of published products
+    /// </summary>
+    public int PublishedCount { get; set; }
+    
+    /// <summary>
+    /// Gets or sets the number of remaining products to send
+    /// </summary>
+    public int RemainingCount { get; set; }
+}
+
+/// <summary>
 /// Controller for sending messages via Telegram bot
 /// </summary>
 [ApiController]
@@ -93,19 +115,21 @@ public class TelegramController : ControllerBase
     private readonly ITelegramNotificationService _telegramService;
     private readonly ILogger<TelegramController> _logger;
     private readonly AppDbContext _context;
-
     private readonly IProductService _productService;
+    private readonly IServiceScopeFactory _serviceScopeFactory;
 
     public TelegramController(
         ITelegramNotificationService telegramService,
         ILogger<TelegramController> logger,
         AppDbContext context,
-        IProductService productService)
+        IProductService productService,
+        IServiceScopeFactory serviceScopeFactory)
     {
         _telegramService = telegramService;
         _logger = logger;
         _context = context;
         _productService = productService;
+        _serviceScopeFactory = serviceScopeFactory;
     }
 
     /// <summary>
@@ -358,6 +382,8 @@ public class TelegramController : ControllerBase
             }
 
             // Send all products to channel asynchronously (in parallel)
+            // Update PublishedAt immediately after each successful send for real-time progress tracking
+            var moscowNow = Bebochka.Api.Helpers.DateTimeHelper.GetMoscowTime();
             var sendTasks = products.Select(async product =>
             {
                 try
@@ -414,6 +440,23 @@ public class TelegramController : ControllerBase
                         success = await _telegramService.SendMessageToChannelAsync(caption);
                     }
 
+                    // Update PublishedAt immediately after successful send for real-time progress tracking
+                    if (success)
+                    {
+                        // Use a separate scope to avoid concurrency issues with parallel updates
+                        using var scope = _serviceScopeFactory.CreateScope();
+                        var scopedContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                        var productToUpdate = await scopedContext.Products.FindAsync(product.Id);
+                        if (productToUpdate != null)
+                        {
+                            productToUpdate.PublishedAt = moscowNow;
+                            productToUpdate.UpdatedAt = DateTime.UtcNow;
+                            await scopedContext.SaveChangesAsync();
+                            _logger.LogInformation("Product {ProductId} ({ProductName}) successfully sent and PublishedAt updated", 
+                                product.Id, product.Name);
+                        }
+                    }
+
                     return new ProductSendResult
                     {
                         ProductId = product.Id,
@@ -451,20 +494,6 @@ public class TelegramController : ControllerBase
             var taskResults = await Task.WhenAll(sendTasks);
             results.AddRange(taskResults);
 
-            // Update PublishedAt for all successfully sent products
-            var moscowNow = Bebochka.Api.Helpers.DateTimeHelper.GetMoscowTime();
-            var successfulProductIds = results.Where(r => r.Success).Select(r => r.ProductId).ToList();
-            if (successfulProductIds.Any())
-            {
-                var successfulProducts = products.Where(p => successfulProductIds.Contains(p.Id)).ToList();
-                foreach (var product in successfulProducts)
-                {
-                    product.PublishedAt = moscowNow;
-                    product.UpdatedAt = DateTime.UtcNow;
-                }
-                await _context.SaveChangesAsync();
-            }
-
             var successCount = results.Count(r => r.Success);
             var failCount = results.Count(r => !r.Success);
 
@@ -484,6 +513,48 @@ public class TelegramController : ControllerBase
         {
             _logger.LogError(ex, "Error sending products to channel");
             return StatusCode(500, new { message = "Error sending products to channel", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Gets the sending status for products by their IDs
+    /// Returns how many products have been published (sent to channel)
+    /// </summary>
+    /// <param name="productIds">List of product IDs to check</param>
+    /// <returns>Status with count of published products</returns>
+    /// <response code="200">Status retrieved successfully</response>
+    /// <response code="400">Invalid request</response>
+    /// <response code="401">Unauthorized</response>
+    [HttpPost("channel/send-status")]
+    [Authorize]
+    [ProducesResponseType(typeof(SendStatusResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<SendStatusResponseDto>> GetSendStatus([FromBody] List<int> productIds)
+    {
+        if (productIds == null || productIds.Count == 0)
+        {
+            return BadRequest(new { message = "Product IDs are required" });
+        }
+
+        try
+        {
+            // Count how many products have been published (have PublishedAt set)
+            var publishedCount = await _context.Products
+                .Where(p => productIds.Contains(p.Id) && p.PublishedAt != null)
+                .CountAsync();
+
+            return Ok(new SendStatusResponseDto
+            {
+                TotalCount = productIds.Count,
+                PublishedCount = publishedCount,
+                RemainingCount = productIds.Count - publishedCount
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error getting send status for products");
+            return StatusCode(500, new { message = "Error getting send status", error = ex.Message });
         }
     }
 }
