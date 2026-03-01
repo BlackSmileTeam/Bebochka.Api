@@ -192,7 +192,10 @@ builder.Services.AddAuthorization();
         builder.Services.AddScoped<CollageService>();
         
         // Add HttpClient for Telegram Bot API
-        builder.Services.AddHttpClient<ITelegramNotificationService, TelegramNotificationService>();
+        builder.Services.AddHttpClient<ITelegramNotificationService, TelegramNotificationService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(60); // Увеличиваем таймаут для скачивания изображений
+        });
         
         // Add background services
         builder.Services.AddHostedService<CartCleanupService>();
