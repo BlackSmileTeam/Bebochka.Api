@@ -405,11 +405,11 @@ public class TelegramNotificationService : ITelegramNotificationService
             using var mediaContent = new MultipartFormDataContent();
             mediaContent.Add(new StringContent(_channelId), "chat_id");
 
-            // Формируем массив media объектов
-            var mediaArray = new List<object>();
+            // Формируем массив media объектов для JSON
+            var mediaArray = new List<Dictionary<string, object>>();
             for (int i = 0; i < images.Count; i++)
             {
-                var mediaObj = new Dictionary<string, string>
+                var mediaObj = new Dictionary<string, object>
                 {
                     { "type", "photo" },
                     { "media", $"attach://photo_{i}" }
@@ -425,19 +425,35 @@ public class TelegramNotificationService : ITelegramNotificationService
                 mediaArray.Add(mediaObj);
             }
 
-            // Добавляем media как JSON массив
-            var mediaJson = System.Text.Json.JsonSerializer.Serialize(mediaArray);
+            // Добавляем media как JSON массив строкой
+            var options = new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = false
+            };
+            var mediaJson = System.Text.Json.JsonSerializer.Serialize(mediaArray, options);
             mediaContent.Add(new StringContent(mediaJson), "media");
 
-            // Добавляем файлы
+            // Добавляем файлы с правильными именами
             for (int i = 0; i < images.Count; i++)
             {
                 var fileContent = new ByteArrayContent(images[i].Bytes);
-                fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+                // Определяем правильный Content-Type по расширению
+                var contentType = images[i].Extension.ToLower() switch
+                {
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".png" => "image/png",
+                    ".gif" => "image/gif",
+                    ".webp" => "image/webp",
+                    _ => "image/jpeg"
+                };
+                fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+                // Важно: имя файла должно совпадать с attach://photo_{i}
                 mediaContent.Add(fileContent, $"photo_{i}", $"photo_{i}{images[i].Extension}");
             }
 
+            _logger.LogDebug("Sending media group with {Count} photos to channel {ChannelId}", images.Count, _channelId);
             var mediaResponse = await _httpClient.PostAsync(mediaGroupUrl, mediaContent);
+            
             if (mediaResponse.IsSuccessStatusCode)
             {
                 _logger.LogDebug("Media group sent successfully to channel {ChannelId}", _channelId);
