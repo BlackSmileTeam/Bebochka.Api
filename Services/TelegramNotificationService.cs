@@ -7,6 +7,8 @@ using Bebochka.Api.Data;
 using Bebochka.Api.Models;
 using System.Net.Http.Headers;
 using System.Linq;
+using System.Threading;
+using System.Net.Http;
 
 namespace Bebochka.Api.Services;
 
@@ -316,7 +318,19 @@ public class TelegramNotificationService : ITelegramNotificationService
                 parse_mode = "HTML"
             };
 
-            var response = await _httpClient.PostAsJsonAsync(url, payload);
+            var response = await ExecuteWithRetryAsync(
+                async (ct) => 
+                {
+                    var jsonContent = JsonContent.Create(payload);
+                    var request = new HttpRequestMessage(HttpMethod.Post, url)
+                    {
+                        Content = jsonContent
+                    };
+                    return await _httpClient.SendAsync(request, ct);
+                },
+                $"Send message to channel {_channelId}",
+                3
+            );
             
             if (response.IsSuccessStatusCode)
             {
@@ -338,7 +352,7 @@ public class TelegramNotificationService : ITelegramNotificationService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Exception while sending message to channel {ChannelId}", _channelId);
+            _logger.LogError(ex, "Exception while sending message to channel {ChannelId} after retries", _channelId);
             await SaveErrorToDatabase(ex, message, 0, "Exception");
             return false;
         }
@@ -439,7 +453,11 @@ public class TelegramNotificationService : ITelegramNotificationService
                     }
 
                     _logger.LogInformation("Sending photo to channel {ChannelId}", _channelId);
-                    var response = await _httpClient.PostAsync(url, content);
+                    var response = await ExecuteWithRetryAsync(
+                        async (ct) => await _httpClient.PostAsync(url, content, ct),
+                        $"Send photo to channel {_channelId}",
+                        3
+                    );
                     
                     if (response.IsSuccessStatusCode)
                     {
@@ -459,16 +477,9 @@ public class TelegramNotificationService : ITelegramNotificationService
                         return false;
                     }
                 }
-                catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
-                {
-                    _logger.LogError(ex, "Timeout while sending photo to channel {ChannelId}. Request exceeded {Timeout} seconds", 
-                        _channelId, _httpClient.Timeout.TotalSeconds);
-                    await SaveErrorToDatabase(ex, message, 1, "Timeout");
-                    return false;
-                }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Exception while sending photo to channel {ChannelId}. Error: {Message}", 
+                    _logger.LogError(ex, "Exception while sending photo to channel {ChannelId} after retries. Error: {Message}", 
                         _channelId, ex.Message);
                     await SaveErrorToDatabase(ex, message, 1, "Exception");
                     return false;
@@ -529,7 +540,11 @@ public class TelegramNotificationService : ITelegramNotificationService
             try
             {
                 _logger.LogInformation("Sending media group with {Count} photos to channel {ChannelId}", images.Count, _channelId);
-                var mediaResponse = await _httpClient.PostAsync(mediaGroupUrl, mediaContent);
+                var mediaResponse = await ExecuteWithRetryAsync(
+                    async (ct) => await _httpClient.PostAsync(mediaGroupUrl, mediaContent, ct),
+                    $"Send media group to channel {_channelId}",
+                    3
+                );
                 
                 if (mediaResponse.IsSuccessStatusCode)
                 {
@@ -549,16 +564,9 @@ public class TelegramNotificationService : ITelegramNotificationService
                     return false;
                 }
             }
-            catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
-            {
-                _logger.LogError(ex, "Timeout while sending media group to channel {ChannelId}. Request exceeded {Timeout} seconds. Images count: {Count}", 
-                    _channelId, _httpClient.Timeout.TotalSeconds, images.Count);
-                await SaveErrorToDatabase(ex, message, images.Count, "Timeout");
-                return false;
-            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Exception while sending media group to channel {ChannelId}. Error: {Message}, Images count: {Count}", 
+                _logger.LogError(ex, "Exception while sending media group to channel {ChannelId} after retries. Error: {Message}, Images count: {Count}", 
                     _channelId, ex.Message, images.Count);
                 await SaveErrorToDatabase(ex, message, images.Count, "Exception");
                 return false;
@@ -613,6 +621,87 @@ public class TelegramNotificationService : ITelegramNotificationService
             // If we can't save the error, just log it
             _logger.LogError(saveEx, "Failed to save error to database");
         }
+    }
+
+    /// <summary>
+    /// Executes HTTP request with retry logic and increasing timeout
+    /// </summary>
+    private async Task<HttpResponseMessage> ExecuteWithRetryAsync(
+        Func<CancellationToken, Task<HttpResponseMessage>> requestFunc,
+        string operationName,
+        int maxRetries = 3)
+    {
+        int[] timeouts = { 500, 750, 1000 }; // Timeouts in seconds for each retry attempt
+        
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            var timeout = timeouts[Math.Min(attempt, timeouts.Length - 1)];
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
+            
+            try
+            {
+                _logger.LogInformation("Attempting {OperationName}, attempt {Attempt}/{MaxRetries}, timeout: {Timeout}s", 
+                    operationName, attempt + 1, maxRetries, timeout);
+                
+                var response = await requestFunc(cts.Token);
+                
+                if (response.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("{OperationName} succeeded on attempt {Attempt}", 
+                        operationName, attempt + 1);
+                    return response;
+                }
+                
+                // If not success but not timeout, log and retry
+                var errorContent = await response.Content.ReadAsStringAsync();
+                _logger.LogWarning("{OperationName} failed on attempt {Attempt}/{MaxRetries}. Status: {Status}, Error: {Error}", 
+                    operationName, attempt + 1, maxRetries, response.StatusCode, errorContent);
+                
+                // If it's the last attempt, return the response
+                if (attempt == maxRetries - 1)
+                {
+                    return response;
+                }
+                
+                // Wait a bit before retry (exponential backoff)
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), CancellationToken.None);
+            }
+            catch (TaskCanceledException ex) when (ex.CancellationToken == cts.Token)
+            {
+                _logger.LogWarning("{OperationName} timed out on attempt {Attempt}/{MaxRetries} with timeout {Timeout}s", 
+                    operationName, attempt + 1, maxRetries, timeout);
+                
+                // If it's the last attempt, throw
+                if (attempt == maxRetries - 1)
+                {
+                    _logger.LogError("{OperationName} failed after {MaxRetries} attempts with increasing timeouts", 
+                        operationName, maxRetries);
+                    throw;
+                }
+                
+                // Wait before retry with increased timeout
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "{OperationName} failed on attempt {Attempt}/{MaxRetries} with exception", 
+                    operationName, attempt + 1, maxRetries);
+                
+                // If it's the last attempt, throw
+                if (attempt == maxRetries - 1)
+                {
+                    _logger.LogError(ex, "{OperationName} failed after {MaxRetries} attempts", 
+                        operationName, maxRetries);
+                    throw;
+                }
+                
+                // Wait before retry
+                await Task.Delay(TimeSpan.FromSeconds(Math.Pow(2, attempt)), CancellationToken.None);
+            }
+        }
+        
+        // Should never reach here, but just in case
+        throw new InvalidOperationException($"{operationName} failed after {maxRetries} attempts");
     }
 }
 
