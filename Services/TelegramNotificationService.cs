@@ -410,25 +410,55 @@ public class TelegramNotificationService : ITelegramNotificationService
 
             if (images.Count == 0)
             {
-                // Если не удалось скачать изображения, отправляем только текст
-                return await SendMessageToChannelAsync(message);
+                // Если не удалось скачать изображения, логируем ошибку и не отправляем сообщение
+                _logger.LogError("Failed to download any images from {Count} URLs. Message will NOT be sent to channel {ChannelId}. Image URLs: {ImageUrls}", 
+                    imageUrls.Count, _channelId, string.Join(", ", imageUrls));
+                return false;
             }
 
             // Если одно изображение, отправляем через sendPhoto
             if (images.Count == 1)
             {
-                var url = $"{_botApiUrl}/sendPhoto";
-                using var content = new MultipartFormDataContent();
-                content.Add(new StringContent(_channelId), "chat_id");
-                content.Add(new ByteArrayContent(images[0].Bytes), "photo", $"photo{images[0].Extension}");
-                if (!string.IsNullOrWhiteSpace(message))
+                try
                 {
-                    content.Add(new StringContent(message), "caption");
-                    content.Add(new StringContent("HTML"), "parse_mode");
-                }
+                    var url = $"{_botApiUrl}/sendPhoto";
+                    using var content = new MultipartFormDataContent();
+                    content.Add(new StringContent(_channelId), "chat_id");
+                    content.Add(new ByteArrayContent(images[0].Bytes), "photo", $"photo{images[0].Extension}");
+                    if (!string.IsNullOrWhiteSpace(message))
+                    {
+                        content.Add(new StringContent(message), "caption");
+                        content.Add(new StringContent("HTML"), "parse_mode");
+                    }
 
-                var response = await _httpClient.PostAsync(url, content);
-                return response.IsSuccessStatusCode;
+                    _logger.LogInformation("Sending photo to channel {ChannelId}", _channelId);
+                    var response = await _httpClient.PostAsync(url, content);
+                    
+                    if (response.IsSuccessStatusCode)
+                    {
+                        _logger.LogInformation("Photo sent successfully to channel {ChannelId}", _channelId);
+                        return true;
+                    }
+                    else
+                    {
+                        var errorContent = await response.Content.ReadAsStringAsync();
+                        _logger.LogError("Failed to send photo to channel {ChannelId}. Status: {Status}, Error: {Error}", 
+                            _channelId, response.StatusCode, errorContent);
+                        return false;
+                    }
+                }
+                catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+                {
+                    _logger.LogError(ex, "Timeout while sending photo to channel {ChannelId}. Request exceeded {Timeout} seconds", 
+                        _channelId, _httpClient.Timeout.TotalSeconds);
+                    return false;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Exception while sending photo to channel {ChannelId}. Error: {Message}", 
+                        _channelId, ex.Message);
+                    return false;
+                }
             }
 
             // Если несколько изображений, отправляем через sendMediaGroup
@@ -482,27 +512,54 @@ public class TelegramNotificationService : ITelegramNotificationService
                 mediaContent.Add(fileContent, $"photo_{i}", $"photo_{i}{images[i].Extension}");
             }
 
-            _logger.LogDebug("Sending media group with {Count} photos to channel {ChannelId}", images.Count, _channelId);
-            var mediaResponse = await _httpClient.PostAsync(mediaGroupUrl, mediaContent);
-            
-            if (mediaResponse.IsSuccessStatusCode)
+            try
             {
-                _logger.LogDebug("Media group sent successfully to channel {ChannelId}", _channelId);
-                return true;
+                _logger.LogInformation("Sending media group with {Count} photos to channel {ChannelId}", images.Count, _channelId);
+                var mediaResponse = await _httpClient.PostAsync(mediaGroupUrl, mediaContent);
+                
+                if (mediaResponse.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("Media group sent successfully to channel {ChannelId}", _channelId);
+                    return true;
+                }
+                else
+                {
+                    var errorContent = await mediaResponse.Content.ReadAsStringAsync();
+                    _logger.LogError("Failed to send media group to channel {ChannelId}. Status: {Status}, Error: {Error}", 
+                        _channelId, mediaResponse.StatusCode, errorContent);
+                    return false;
+                }
             }
-            else
+            catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
             {
-                var errorContent = await mediaResponse.Content.ReadAsStringAsync();
-                _logger.LogWarning("Failed to send media group to channel {ChannelId}. Status: {Status}, Error: {Error}", 
-                    _channelId, mediaResponse.StatusCode, errorContent);
+                _logger.LogError(ex, "Timeout while sending media group to channel {ChannelId}. Request exceeded {Timeout} seconds. Images count: {Count}", 
+                    _channelId, _httpClient.Timeout.TotalSeconds, images.Count);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception while sending media group to channel {ChannelId}. Error: {Message}, Images count: {Count}", 
+                    _channelId, ex.Message, images.Count);
                 return false;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Exception while sending message with photos to channel {ChannelId}", _channelId);
-            // В случае ошибки пытаемся отправить только текст
-            return await SendMessageToChannelAsync(message);
+            _logger.LogError(ex, "Critical error while sending message with photos to channel {ChannelId}. Error: {Message}. Message will NOT be sent.", 
+                _channelId, ex.Message);
+            
+            // Логируем детали ошибки для отладки
+            if (ex is TaskCanceledException tce && tce.InnerException is TimeoutException)
+            {
+                _logger.LogError("Request timeout: {Timeout} seconds exceeded", _httpClient.Timeout.TotalSeconds);
+            }
+            else if (ex.InnerException != null)
+            {
+                _logger.LogError("Inner exception: {InnerMessage}", ex.InnerException.Message);
+            }
+            
+            // При ошибке НЕ отправляем сообщение, только логируем
+            return false;
         }
     }
 }
