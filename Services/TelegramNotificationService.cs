@@ -45,8 +45,14 @@ public class TelegramNotificationService : ITelegramNotificationService
         _channelId = configuration["TelegramBot:ChannelId"];
         
         // Log token presence (but not the actual token for security)
-        _logger.LogInformation("TelegramNotificationService initialized. Bot token configured: {TokenPresent}, Channel ID configured: {ChannelIdPresent}", 
-            !string.IsNullOrEmpty(_botToken), !string.IsNullOrEmpty(_channelId));
+        _logger.LogInformation("TelegramNotificationService initialized. Bot token configured: {TokenPresent}, Channel ID configured: {ChannelIdPresent}, Channel ID value: {ChannelIdValue}", 
+            !string.IsNullOrEmpty(_botToken), !string.IsNullOrEmpty(_channelId), 
+            string.IsNullOrEmpty(_channelId) ? "EMPTY" : _channelId);
+        
+        if (string.IsNullOrWhiteSpace(_channelId))
+        {
+            _logger.LogWarning("TelegramBot:ChannelId is not configured. Channel messages will fail. Check environment variable TelegramBot__ChannelId or configuration key TelegramBot:ChannelId");
+        }
     }
 
     /// <summary>
