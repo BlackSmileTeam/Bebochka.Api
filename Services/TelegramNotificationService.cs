@@ -361,11 +361,10 @@ public class TelegramNotificationService : ITelegramNotificationService
                 return await SendMessageToChannelAsync(message);
             }
 
-            // Скачиваем изображения
-            var images = new List<(byte[] Bytes, string Extension)>();
+            // Скачиваем изображения параллельно для ускорения
             _logger.LogInformation("Starting to download {Count} images for channel message", imageUrls.Count);
             
-            foreach (var imageUrl in imageUrls)
+            var downloadTasks = imageUrls.Select(async imageUrl =>
             {
                 try
                 {
@@ -381,19 +380,30 @@ public class TelegramNotificationService : ITelegramNotificationService
                         
                         _logger.LogDebug("Successfully downloaded image: {Size} bytes, extension: {Extension}", 
                             imageBytes.Length, extension);
-                        images.Add((imageBytes, extension));
+                        return (Success: true, Bytes: imageBytes, Extension: extension);
                     }
                     else
                     {
                         _logger.LogWarning("Failed to download image from {ImageUrl}. Status: {Status}", 
                             imageUrl, imageResponse.StatusCode);
+                        return (Success: false, Bytes: (byte[]?)null, Extension: (string?)null);
                     }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogWarning(ex, "Exception while downloading image from {ImageUrl}", imageUrl);
+                    return (Success: false, Bytes: (byte[]?)null, Extension: (string?)null);
                 }
-            }
+            });
+            
+            // Ждем завершения всех загрузок параллельно
+            var downloadResults = await Task.WhenAll(downloadTasks);
+            
+            // Фильтруем успешно загруженные изображения
+            var images = downloadResults
+                .Where(r => r.Success && r.Bytes != null && r.Extension != null)
+                .Select(r => (Bytes: r.Bytes!, Extension: r.Extension!))
+                .ToList();
             
             _logger.LogInformation("Downloaded {Count} images out of {Total}", images.Count, imageUrls.Count);
 
