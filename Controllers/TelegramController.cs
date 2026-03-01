@@ -5,6 +5,7 @@ using Bebochka.Api.Services;
 using Bebochka.Api.Models.DTOs;
 using Bebochka.Api.Data;
 using Bebochka.Api.Models;
+using System.Linq;
 
 namespace Bebochka.Api.Controllers;
 
@@ -356,8 +357,8 @@ public class TelegramController : ControllerBase
                 return BadRequest(new { message = "No products found with provided IDs" });
             }
 
-            // Send each product to channel
-            foreach (var product in products)
+            // Send all products to channel asynchronously (in parallel)
+            var sendTasks = products.Select(async product =>
             {
                 try
                 {
@@ -413,33 +414,55 @@ public class TelegramController : ControllerBase
                         success = await _telegramService.SendMessageToChannelAsync(caption);
                     }
 
-                    results.Add(new ProductSendResult
+                    return new ProductSendResult
                     {
                         ProductId = product.Id,
                         ProductName = product.Name,
                         Success = success
-                    });
-
-                    // If successful, update PublishedAt
-                    if (success)
-                    {
-                        var moscowNow = Bebochka.Api.Helpers.DateTimeHelper.GetMoscowTime();
-                        product.PublishedAt = moscowNow;
-                        product.UpdatedAt = DateTime.UtcNow;
-                        await _context.SaveChangesAsync();
-                    }
+                    };
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error sending product {ProductId} to channel", product.Id);
-                    results.Add(new ProductSendResult
+                    _logger.LogError(ex, "Error sending product {ProductId} ({ProductName}) to channel. Exception type: {ExceptionType}, Message: {Message}", 
+                        product.Id, product.Name, ex.GetType().Name, ex.Message);
+                    
+                    // Provide more detailed error message
+                    string errorMessage = ex.Message;
+                    if (ex is TaskCanceledException || (ex.InnerException != null && ex.InnerException is TimeoutException))
+                    {
+                        errorMessage = "Timeout while sending to Telegram channel. The images may be too large or the connection is slow.";
+                    }
+                    else if (ex.Message.Contains("Broken pipe") || ex.Message.Contains("Unable to write data"))
+                    {
+                        errorMessage = "Connection was interrupted while sending. This may happen with large images. Please try again.";
+                    }
+                    
+                    return new ProductSendResult
                     {
                         ProductId = product.Id,
                         ProductName = product.Name,
                         Success = false,
-                        ErrorMessage = ex.Message
-                    });
+                        ErrorMessage = errorMessage
+                    };
                 }
+            });
+
+            // Wait for all tasks to complete (all products sent in parallel)
+            var taskResults = await Task.WhenAll(sendTasks);
+            results.AddRange(taskResults);
+
+            // Update PublishedAt for all successfully sent products
+            var moscowNow = Bebochka.Api.Helpers.DateTimeHelper.GetMoscowTime();
+            var successfulProductIds = results.Where(r => r.Success).Select(r => r.ProductId).ToList();
+            if (successfulProductIds.Any())
+            {
+                var successfulProducts = products.Where(p => successfulProductIds.Contains(p.Id)).ToList();
+                foreach (var product in successfulProducts)
+                {
+                    product.PublishedAt = moscowNow;
+                    product.UpdatedAt = DateTime.UtcNow;
+                }
+                await _context.SaveChangesAsync();
             }
 
             var successCount = results.Count(r => r.Success);
