@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Hosting;
 using Bebochka.Api.Data;
 using System.Net.Http.Headers;
+using System.Linq;
 
 namespace Bebochka.Api.Services;
 
