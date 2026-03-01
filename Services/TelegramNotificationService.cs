@@ -556,16 +556,27 @@ public class TelegramNotificationService : ITelegramNotificationService
                 var captionPreview = message?.Length > 100 ? message.Substring(0, 100) + "..." : message ?? "No caption";
                 _logger.LogInformation("Sending media group with {Count} photos to channel {ChannelId}. Caption preview: {CaptionPreview}", 
                     images.Count, _channelId, captionPreview);
+                
+                _logger.LogDebug("Calling ExecuteWithRetryAsync for media group");
                 var mediaResponse = await ExecuteWithRetryAsync(
-                    async (ct) => await _httpClient.PostAsync(mediaGroupUrl, mediaContent, ct),
+                    async (ct) => 
+                    {
+                        _logger.LogDebug("Executing POST request to sendMediaGroup");
+                        var response = await _httpClient.PostAsync(mediaGroupUrl, mediaContent, ct);
+                        _logger.LogDebug("Received response from sendMediaGroup. Status: {Status}", response.StatusCode);
+                        return response;
+                    },
                     $"Send media group to channel {_channelId}",
                     3
                 );
                 
+                _logger.LogInformation("ExecuteWithRetryAsync completed. Response status: {Status}", mediaResponse.StatusCode);
+                
                 if (mediaResponse.IsSuccessStatusCode)
                 {
-                    _logger.LogInformation("Media group sent successfully to channel {ChannelId}. Caption: {Caption}", 
-                        _channelId, message ?? "No caption");
+                    var responseContent = await mediaResponse.Content.ReadAsStringAsync();
+                    _logger.LogInformation("Media group sent successfully to channel {ChannelId}. Response: {Response}, Caption: {Caption}", 
+                        _channelId, responseContent, message ?? "No caption");
                     return true;
                 }
                 else
@@ -581,10 +592,17 @@ public class TelegramNotificationService : ITelegramNotificationService
                     return false;
                 }
             }
+            catch (TaskCanceledException tce)
+            {
+                _logger.LogError(tce, "TaskCanceledException while sending media group to channel {ChannelId}. Message: {Message}, Images count: {Count}", 
+                    _channelId, tce.Message, images.Count);
+                await SaveErrorToDatabase(tce, message, images.Count, "Timeout");
+                return false;
+            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Exception while sending media group to channel {ChannelId} after retries. Error: {Message}, Images count: {Count}", 
-                    _channelId, ex.Message, images.Count);
+                _logger.LogError(ex, "Exception while sending media group to channel {ChannelId} after retries. Exception type: {Type}, Message: {Message}, StackTrace: {StackTrace}, Images count: {Count}", 
+                    _channelId, ex.GetType().Name, ex.Message, ex.StackTrace, images.Count);
                 await SaveErrorToDatabase(ex, message, images.Count, "Exception");
                 return false;
             }
@@ -668,12 +686,17 @@ public class TelegramNotificationService : ITelegramNotificationService
                 _logger.LogInformation("Attempting {OperationName}, attempt {Attempt}/{MaxRetries}, timeout: {Timeout}s", 
                     operationName, attempt + 1, maxRetries, timeout);
                 
+                _logger.LogDebug("Executing request function for {OperationName}, attempt {Attempt}", 
+                    operationName, attempt + 1);
                 var response = await requestFunc(cts.Token);
+                _logger.LogDebug("Request function completed for {OperationName}, attempt {Attempt}. Status: {Status}", 
+                    operationName, attempt + 1, response.StatusCode);
                 
                 if (response.IsSuccessStatusCode)
                 {
-                    _logger.LogInformation("{OperationName} succeeded on attempt {Attempt}", 
-                        operationName, attempt + 1);
+                    var successContent = await response.Content.ReadAsStringAsync();
+                    _logger.LogInformation("{OperationName} succeeded on attempt {Attempt}. Response: {Response}", 
+                        operationName, attempt + 1, successContent);
                     return response;
                 }
                 
@@ -685,6 +708,8 @@ public class TelegramNotificationService : ITelegramNotificationService
                 // If it's the last attempt, return the response
                 if (attempt == maxRetries - 1)
                 {
+                    _logger.LogError("{OperationName} failed on final attempt {Attempt}. Returning failed response", 
+                        operationName, attempt + 1);
                     return response;
                 }
                 
