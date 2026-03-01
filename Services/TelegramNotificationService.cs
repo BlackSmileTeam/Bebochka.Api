@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Hosting;
 using Bebochka.Api.Data;
+using Bebochka.Api.Models;
 using System.Net.Http.Headers;
 using System.Linq;
 
@@ -327,12 +328,18 @@ public class TelegramNotificationService : ITelegramNotificationService
                 var errorContent = await response.Content.ReadAsStringAsync();
                 _logger.LogWarning("Failed to send message to channel {ChannelId}. Status: {Status}, URL: {Url}, Error: {Error}", 
                     _channelId, response.StatusCode, url.Replace(_botToken, "***"), errorContent);
+                await SaveErrorToDatabase(
+                    new Exception($"HTTP {response.StatusCode}: {errorContent}"), 
+                    message, 
+                    0, 
+                    "ApiError");
                 return false;
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Exception while sending message to channel {ChannelId}", _channelId);
+            await SaveErrorToDatabase(ex, message, 0, "Exception");
             return false;
         }
     }
@@ -444,6 +451,11 @@ public class TelegramNotificationService : ITelegramNotificationService
                         var errorContent = await response.Content.ReadAsStringAsync();
                         _logger.LogError("Failed to send photo to channel {ChannelId}. Status: {Status}, Error: {Error}", 
                             _channelId, response.StatusCode, errorContent);
+                        await SaveErrorToDatabase(
+                            new Exception($"HTTP {response.StatusCode}: {errorContent}"), 
+                            message, 
+                            1, 
+                            "ApiError");
                         return false;
                     }
                 }
@@ -451,12 +463,14 @@ public class TelegramNotificationService : ITelegramNotificationService
                 {
                     _logger.LogError(ex, "Timeout while sending photo to channel {ChannelId}. Request exceeded {Timeout} seconds", 
                         _channelId, _httpClient.Timeout.TotalSeconds);
+                    await SaveErrorToDatabase(ex, message, 1, "Timeout");
                     return false;
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Exception while sending photo to channel {ChannelId}. Error: {Message}", 
                         _channelId, ex.Message);
+                    await SaveErrorToDatabase(ex, message, 1, "Exception");
                     return false;
                 }
             }
@@ -527,6 +541,11 @@ public class TelegramNotificationService : ITelegramNotificationService
                     var errorContent = await mediaResponse.Content.ReadAsStringAsync();
                     _logger.LogError("Failed to send media group to channel {ChannelId}. Status: {Status}, Error: {Error}", 
                         _channelId, mediaResponse.StatusCode, errorContent);
+                    await SaveErrorToDatabase(
+                        new Exception($"HTTP {mediaResponse.StatusCode}: {errorContent}"), 
+                        message, 
+                        images.Count, 
+                        "ApiError");
                     return false;
                 }
             }
@@ -534,12 +553,14 @@ public class TelegramNotificationService : ITelegramNotificationService
             {
                 _logger.LogError(ex, "Timeout while sending media group to channel {ChannelId}. Request exceeded {Timeout} seconds. Images count: {Count}", 
                     _channelId, _httpClient.Timeout.TotalSeconds, images.Count);
+                await SaveErrorToDatabase(ex, message, images.Count, "Timeout");
                 return false;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Exception while sending media group to channel {ChannelId}. Error: {Message}, Images count: {Count}", 
                     _channelId, ex.Message, images.Count);
+                await SaveErrorToDatabase(ex, message, images.Count, "Exception");
                 return false;
             }
         }
@@ -548,7 +569,10 @@ public class TelegramNotificationService : ITelegramNotificationService
             _logger.LogError(ex, "Critical error while sending message with photos to channel {ChannelId}. Error: {Message}. Message will NOT be sent.", 
                 _channelId, ex.Message);
             
-            // Логируем детали ошибки для отладки
+            // Save error to database
+            await SaveErrorToDatabase(ex, message, imageUrls?.Count ?? 0, null);
+            
+            // Log error details for debugging
             if (ex is TaskCanceledException tce && tce.InnerException is TimeoutException)
             {
                 _logger.LogError("Request timeout: {Timeout} seconds exceeded", _httpClient.Timeout.TotalSeconds);
@@ -558,8 +582,36 @@ public class TelegramNotificationService : ITelegramNotificationService
                 _logger.LogError("Inner exception: {InnerMessage}", ex.InnerException.Message);
             }
             
-            // При ошибке НЕ отправляем сообщение, только логируем
+            // On error, do NOT send message, only log
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Saves error to database for later analysis
+    /// </summary>
+    private async Task SaveErrorToDatabase(Exception ex, string? message, int imageCount, string? errorType)
+    {
+        try
+        {
+            var error = new TelegramError
+            {
+                ErrorDate = DateTime.UtcNow,
+                Message = ex.Message.Length > 1000 ? ex.Message.Substring(0, 1000) : ex.Message,
+                Details = ex.ToString().Length > 5000 ? ex.ToString().Substring(0, 5000) : ex.ToString(),
+                ErrorType = errorType ?? (ex is TaskCanceledException ? "Timeout" : ex.GetType().Name),
+                ImageCount = imageCount > 0 ? imageCount : null,
+                ChannelId = _channelId,
+                ProductInfo = message?.Length > 500 ? message.Substring(0, 500) : message
+            };
+
+            _context.TelegramErrors.Add(error);
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception saveEx)
+        {
+            // If we can't save the error, just log it
+            _logger.LogError(saveEx, "Failed to save error to database");
         }
     }
 }

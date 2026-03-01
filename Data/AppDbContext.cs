@@ -52,6 +52,11 @@ public class AppDbContext : DbContext
     public DbSet<Brand> Brands { get; set; }
 
     /// <summary>
+    /// Gets or sets the TelegramErrors database set
+    /// </summary>
+    public DbSet<TelegramError> TelegramErrors { get; set; }
+
+    /// <summary>
     /// Configures the entity models and their relationships
     /// </summary>
     /// <param name="modelBuilder">Model builder instance</param>
@@ -146,6 +151,19 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
             entity.HasIndex(e => e.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<TelegramError>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Message).IsRequired().HasMaxLength(1000);
+            entity.Property(e => e.Details).HasMaxLength(5000);
+            entity.Property(e => e.ErrorType).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.ProductInfo).HasMaxLength(500);
+            entity.Property(e => e.ChannelId).HasMaxLength(100);
+            entity.Property(e => e.ErrorDate).IsRequired();
+            entity.HasIndex(e => e.ErrorDate);
+            entity.HasIndex(e => e.ErrorType);
         });
     }
 }
