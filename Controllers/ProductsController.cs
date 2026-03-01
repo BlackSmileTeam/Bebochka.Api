@@ -412,8 +412,8 @@ public class ProductsController : ControllerBase
                 PublishedAt = moscowNow
             };
             
-            // Update product with empty image paths (we're only updating PublishedAt)
-            var product = await _productService.UpdateProductAsync(id, updateDto, new List<string>());
+            // Update product with null image paths to preserve existing images (we're only updating PublishedAt)
+            var product = await _productService.UpdateProductAsync(id, updateDto, null);
             if (product == null)
                 return NotFound();
 

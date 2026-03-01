@@ -135,16 +135,30 @@ public class ProductService : IProductService
         var product = await _context.Products.FindAsync(id);
         if (product == null) return null;
 
-        product.Name = dto.Name;
-        product.Brand = dto.Brand;
-        product.Description = dto.Description;
-        product.Price = dto.Price;
-        product.Size = dto.Size;
-        product.Color = dto.Color;
-        product.Images = imagePaths;
-        product.QuantityInStock = dto.QuantityInStock > 0 ? dto.QuantityInStock : product.QuantityInStock;
-        product.Gender = dto.Gender;
-        product.Condition = dto.Condition;
+        // Only update fields that are provided in DTO (non-empty/non-null)
+        // For PublishProduct, we only want to update PublishedAt, so we check if other fields are set
+        if (!string.IsNullOrEmpty(dto.Name))
+            product.Name = dto.Name;
+        if (dto.Brand != null)
+            product.Brand = dto.Brand;
+        if (dto.Description != null)
+            product.Description = dto.Description;
+        if (dto.Price > 0)
+            product.Price = dto.Price;
+        if (dto.Size != null)
+            product.Size = dto.Size;
+        if (dto.Color != null)
+            product.Color = dto.Color;
+        // Only update images if new images are provided (preserve existing images if empty list)
+        if (imagePaths != null && imagePaths.Count > 0)
+            product.Images = imagePaths;
+        // If imagePaths is null, it means we're not updating images, so keep existing ones
+        if (dto.QuantityInStock > 0)
+            product.QuantityInStock = dto.QuantityInStock;
+        if (dto.Gender != null)
+            product.Gender = dto.Gender;
+        if (dto.Condition != null)
+            product.Condition = dto.Condition;
         // PublishedAt comes as UTC DateTime but represents Moscow time components
         // Extract components and store as Moscow time
         if (dto.PublishedAt.HasValue)
