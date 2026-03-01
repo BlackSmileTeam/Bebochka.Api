@@ -20,14 +20,18 @@ public class TelegramController : ControllerBase
     private readonly ILogger<TelegramController> _logger;
     private readonly AppDbContext _context;
 
+    private readonly IProductService _productService;
+
     public TelegramController(
         ITelegramNotificationService telegramService,
         ILogger<TelegramController> logger,
-        AppDbContext context)
+        AppDbContext context,
+        IProductService productService)
     {
         _telegramService = telegramService;
         _logger = logger;
         _context = context;
+        _productService = productService;
     }
 
     /// <summary>
@@ -240,6 +244,150 @@ public class TelegramController : ControllerBase
         {
             _logger.LogError(ex, "Error sending message to channel");
             return StatusCode(500, new { message = "Error sending message to channel", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Sends products to Telegram channel by product IDs
+    /// All message formatting and image loading happens on the backend
+    /// </summary>
+    /// <param name="request">Request containing product IDs</param>
+    /// <returns>Response with success status and details</returns>
+    /// <response code="200">Products sent successfully (or partially)</response>
+    /// <response code="400">Invalid request (no product IDs provided)</response>
+    /// <response code="401">Unauthorized</response>
+    [HttpPost("channel/send-products")]
+    [Authorize]
+    [ProducesResponseType(typeof(SendProductsToChannelResponseDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<SendProductsToChannelResponseDto>> SendProductsToChannel([FromBody] SendProductsToChannelRequestDto request)
+    {
+        if (request.ProductIds == null || request.ProductIds.Count == 0)
+        {
+            return BadRequest(new { message = "Product IDs are required" });
+        }
+
+        try
+        {
+            var results = new List<ProductSendResult>();
+            var baseUrl = $"{Request.Scheme}://{Request.Host}";
+
+            // Load products from database
+            var products = await _context.Products
+                .Where(p => request.ProductIds.Contains(p.Id))
+                .ToListAsync();
+
+            if (products.Count == 0)
+            {
+                return BadRequest(new { message = "No products found with provided IDs" });
+            }
+
+            // Send each product to channel
+            foreach (var product in products)
+            {
+                try
+                {
+                    // Format message on backend
+                    var caption = $"🛍️ {product.Name}\n";
+                    if (!string.IsNullOrEmpty(product.Brand))
+                        caption += $"🏷️ Бренд: {product.Brand}\n";
+                    if (!string.IsNullOrEmpty(product.Size))
+                        caption += $"📏 Размер: {product.Size}\n";
+                    if (!string.IsNullOrEmpty(product.Color))
+                        caption += $"🎨 Цвет: {product.Color}\n";
+                    if (!string.IsNullOrEmpty(product.Gender))
+                        caption += $"👤 Пол: {product.Gender}\n";
+                    if (!string.IsNullOrEmpty(product.Condition))
+                        caption += $"✨ Состояние: {product.Condition}\n";
+                    if (!string.IsNullOrEmpty(product.Description))
+                        caption += $"\n📝 {product.Description}\n";
+                    caption += $"\n💰 Цена: {product.Price:N0} ₽\n";
+
+                    // Build image URLs from database paths
+                    var imageUrls = new List<string>();
+                    if (product.Images != null && product.Images.Any())
+                    {
+                        foreach (var imagePath in product.Images)
+                        {
+                            if (string.IsNullOrEmpty(imagePath)) continue;
+
+                            string fullUrl;
+                            if (imagePath.StartsWith("http"))
+                            {
+                                fullUrl = imagePath;
+                            }
+                            else if (imagePath.StartsWith("/"))
+                            {
+                                fullUrl = $"{baseUrl}{imagePath}";
+                            }
+                            else
+                            {
+                                fullUrl = $"{baseUrl}/{imagePath.TrimStart('/')}";
+                            }
+                            imageUrls.Add(fullUrl);
+                        }
+                    }
+
+                    // Send to channel
+                    bool success;
+                    if (imageUrls.Any())
+                    {
+                        success = await _telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls);
+                    }
+                    else
+                    {
+                        success = await _telegramService.SendMessageToChannelAsync(caption);
+                    }
+
+                    results.Add(new ProductSendResult
+                    {
+                        ProductId = product.Id,
+                        ProductName = product.Name,
+                        Success = success
+                    });
+
+                    // If successful, update PublishedAt
+                    if (success)
+                    {
+                        var moscowNow = Bebochka.Api.Helpers.DateTimeHelper.GetMoscowTime();
+                        product.PublishedAt = moscowNow;
+                        product.UpdatedAt = DateTime.UtcNow;
+                        await _context.SaveChangesAsync();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error sending product {ProductId} to channel", product.Id);
+                    results.Add(new ProductSendResult
+                    {
+                        ProductId = product.Id,
+                        ProductName = product.Name,
+                        Success = false,
+                        ErrorMessage = ex.Message
+                    });
+                }
+            }
+
+            var successCount = results.Count(r => r.Success);
+            var failCount = results.Count(r => !r.Success);
+
+            return Ok(new SendProductsToChannelResponseDto
+            {
+                Success = failCount == 0,
+                SuccessCount = successCount,
+                FailCount = failCount,
+                TotalCount = results.Count,
+                Results = results,
+                Message = failCount == 0
+                    ? $"All {successCount} product(s) sent successfully"
+                    : $"Sent {successCount} product(s), {failCount} failed"
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error sending products to channel");
+            return StatusCode(500, new { message = "Error sending products to channel", error = ex.Message });
         }
     }
 }
