@@ -58,7 +58,7 @@ public class Order
     /// <summary>
     /// Gets or sets the order status (В сборке, Ожидает оплату, В пути, Доставлен, Отменен)
     /// </summary>
-    public string Status { get; set; } = "В сборке";
+    public string Status { get; set; } = "Ожидает оплату";
     
     /// <summary>
     /// Gets or sets the list of order items

@@ -106,7 +106,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.CustomerPhone).IsRequired().HasMaxLength(50);
             entity.Property(e => e.CustomerEmail).HasMaxLength(255);
             entity.Property(e => e.DeliveryMethod).HasMaxLength(50);
-            entity.Property(e => e.Status).IsRequired().HasMaxLength(50).HasDefaultValue("В сборке");
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(50).HasDefaultValue("Ожидает оплату");
             entity.Property(e => e.TotalAmount).HasColumnType("decimal(10,2)");
             entity.Property(e => e.CancellationReason).HasMaxLength(500);
             entity.HasIndex(e => e.OrderNumber).IsUnique();

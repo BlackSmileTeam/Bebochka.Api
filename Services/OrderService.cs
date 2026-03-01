@@ -68,7 +68,7 @@ public class OrderService : IOrderService
             DeliveryMethod = dto.DeliveryMethod,
             Comment = dto.Comment,
             TotalAmount = totalAmount,
-            Status = "В сборке",
+            Status = "Ожидает оплату",
             OrderItems = orderItems,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow

@@ -14,7 +14,7 @@ public class OrderDto
     public string? DeliveryMethod { get; set; }
     public string? Comment { get; set; }
     public decimal TotalAmount { get; set; }
-    public string Status { get; set; } = "В сборке";
+    public string Status { get; set; } = "Ожидает оплату";
     public List<OrderItemDto> OrderItems { get; set; } = new();
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
