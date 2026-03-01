@@ -54,10 +54,23 @@ public class TelegramErrorsController : ControllerBase
 
             return Ok(groupedErrors);
         }
+        catch (Microsoft.EntityFrameworkCore.DbUpdateException dbEx)
+        {
+            // Table might not exist - return empty result
+            _logger.LogWarning(dbEx, "TelegramErrors table may not exist. Returning empty result. Error: {Message}", dbEx.Message);
+            return Ok(new Dictionary<string, List<TelegramErrorDto>>());
+        }
+        catch (Exception ex) when (ex.Message.Contains("doesn't exist") || ex.Message.Contains("Table") || ex.Message.Contains("Unknown table"))
+        {
+            // Table doesn't exist - return empty result
+            _logger.LogWarning(ex, "TelegramErrors table does not exist. Returning empty result. Please run create_telegram_errors_table.sql");
+            return Ok(new Dictionary<string, List<TelegramErrorDto>>());
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching Telegram errors");
-            return StatusCode(500, new { message = "Failed to fetch errors" });
+            _logger.LogError(ex, "Error fetching Telegram errors: {Message}, StackTrace: {StackTrace}", 
+                ex.Message, ex.StackTrace);
+            return StatusCode(500, new { message = "Failed to fetch errors", error = ex.Message });
         }
     }
 
