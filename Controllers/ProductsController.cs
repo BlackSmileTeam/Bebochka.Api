@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Bebochka.Api.Models.DTOs;
 using Bebochka.Api.Services;
 using Microsoft.AspNetCore.Authorization;
+using Bebochka.Api.Helpers;
 
 namespace Bebochka.Api.Controllers;
 
@@ -312,6 +313,46 @@ public class ProductsController : ControllerBase
     {
         var products = await _productService.GetAllProductsForAdminAsync();
         return Ok(products);
+    }
+
+    /// <summary>
+    /// Marks a product as published by setting PublishedAt to current time
+    /// </summary>
+    /// <param name="id">Product identifier</param>
+    /// <returns>Updated product</returns>
+    /// <response code="200">Product published successfully</response>
+    /// <response code="404">Product not found</response>
+    /// <response code="401">Unauthorized</response>
+    [HttpPatch("{id}/publish")]
+    [Authorize]
+    [ProducesResponseType(typeof(ProductDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<ProductDto>> PublishProduct(int id)
+    {
+        try
+        {
+            // Get current Moscow time
+            var moscowNow = DateTimeHelper.GetMoscowTime();
+            
+            // Create update DTO with only PublishedAt set
+            var updateDto = new UpdateProductDto
+            {
+                PublishedAt = moscowNow
+            };
+            
+            // Update product with empty image paths (we're only updating PublishedAt)
+            var product = await _productService.UpdateProductAsync(id, updateDto, new List<string>());
+            if (product == null)
+                return NotFound();
+
+            return Ok(product);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] [ERROR] Exception in PublishProduct: {ex.Message}");
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "An error occurred while publishing the product.", details = ex.Message });
+        }
     }
 }
 
