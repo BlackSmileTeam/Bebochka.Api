@@ -151,6 +151,13 @@ jobs:
           chmod 777 ${{ env.DEPLOY_DIR }}/uploads
           echo "Uploads directory created with permissions: $(ls -ld ${{ env.DEPLOY_DIR }}/uploads)"
 
+    - name: Verify Docker image exists
+      run: |
+        echo "Checking Docker image..."
+        ls -lh ${{ env.IMAGE_NAME }}.tar.gz || exit 1
+        test -f ${{ env.IMAGE_NAME }}.tar.gz || exit 1
+        echo "✅ Docker image exists"
+        
     - name: Copy Docker image to server
       uses: appleboy/scp-action@v0.1.7
       with:
@@ -159,8 +166,17 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: ${{ env.SSH_PORT }}
         source: "${{ env.IMAGE_NAME }}.tar.gz"
-        target: "/tmp/"
+        target: "/tmp"
+        overwrite: true
 
+    - name: Verify files exist before copying
+      run: |
+        echo "Checking files to copy..."
+        ls -la docker-compose.yml Dockerfile || exit 1
+        test -f docker-compose.yml || exit 1
+        test -f Dockerfile || exit 1
+        echo "✅ All files exist"
+        
     - name: Copy docker-compose.yml and Dockerfile to server
       uses: appleboy/scp-action@v0.1.7
       with:
@@ -169,7 +185,8 @@ jobs:
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: ${{ env.SSH_PORT }}
         source: "docker-compose.yml,Dockerfile"
-        target: "${{ env.DEPLOY_DIR }}/"
+        target: "${{ env.DEPLOY_DIR }}"
+        overwrite: true
 
     - name: Create .env file on server
       uses: appleboy/ssh-action@v1
@@ -178,23 +195,28 @@ jobs:
         username: ${{ secrets.SSH_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
         port: ${{ env.SSH_PORT }}
-        envs: DB_CONNECTION_STRING,TELEGRAM_BOT_TOKEN
         script: |
           #!/bin/bash
           set -euo pipefail
           
           # Create .env file with secrets
           cat > ${{ env.DEPLOY_DIR }}/.env << EOF
-          DB_CONNECTION_STRING=$DB_CONNECTION_STRING
-          TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
+          DB_CONNECTION_STRING=${{ secrets.DB_CONNECTION_STRING }}
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_CHANNEL_ID=${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}
           EOF
           
           # Secure .env file
           chmod 600 ${{ env.DEPLOY_DIR }}/.env
           echo ".env file created successfully"
-      env:
-        DB_CONNECTION_STRING: ${{ secrets.DB_CONNECTION_STRING }}
-        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          echo "Verifying .env file..."
+          if [ -f ${{ env.DEPLOY_DIR }}/.env ]; then
+            echo "✅ .env file created"
+            grep -q "TELEGRAM_BOT_CHANNEL_ID" ${{ env.DEPLOY_DIR }}/.env && echo "✅ TELEGRAM_BOT_CHANNEL_ID found in .env" || echo "⚠️ TELEGRAM_BOT_CHANNEL_ID not found"
+          else
+            echo "❌ .env file not created"
+            exit 1
+          fi
 
     - name: Deploy application
       uses: appleboy/ssh-action@v1
@@ -243,6 +265,15 @@ jobs:
           # Verify permissions after container start
           echo "Checking uploads directory permissions:"
           docker-compose exec -T backend ls -ld /app/wwwroot/uploads || echo "Cannot check permissions inside container"
+          
+          # Verify Telegram configuration
+          echo "Checking Telegram configuration..."
+          docker-compose logs backend | grep -i "telegram\|channel" | tail -10 || echo "No Telegram logs found"
+          if docker-compose exec -T backend env | grep -q "TelegramBot__ChannelId="; then
+            echo "✅ Telegram ChannelId is configured"
+          else
+            echo "⚠️ Warning: Telegram ChannelId might not be configured"
+          fi
 
           # Clean up old images
           docker image prune -f
@@ -287,10 +318,22 @@ jobs:
             echo "⚠️ Warning: Telegram token might not be configured"
           fi
           echo ""
+          echo "Checking Telegram ChannelId configuration:"
+          if docker-compose exec -T backend env | grep -q "TelegramBot__ChannelId="; then
+            echo "✅ Telegram ChannelId is configured"
+            docker-compose exec -T backend env | grep "TelegramBot__ChannelId"
+          else
+            echo "⚠️ Warning: Telegram ChannelId might not be configured"
+          fi
+          echo ""
           echo "Checking .env file:"
-          if [ -f .env ] && grep -q "TELEGRAM_BOT_TOKEN=" .env && grep -q "DB_CONNECTION_STRING=" .env; then
-            echo "✅ .env file is properly configured"
+          if [ -f .env ] && grep -q "TELEGRAM_BOT_TOKEN=" .env && grep -q "DB_CONNECTION_STRING=" .env && grep -q "TELEGRAM_BOT_CHANNEL_ID=" .env; then
+            echo "✅ .env file is properly configured with all required variables"
           else
             echo "⚠️ Warning: .env file might be missing or incomplete"
+            if [ -f .env ]; then
+              echo "Contents of .env (masked):"
+              cat .env | sed 's/\(TELEGRAM_BOT_TOKEN=\).*/\1***/' | sed 's/\(DB_CONNECTION_STRING=.*Password=\).*\(;.*\)/\1***\2/'
+            fi
           fi
           echo "=== Verification completed ==="
