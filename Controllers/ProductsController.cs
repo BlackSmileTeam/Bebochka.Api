@@ -16,16 +16,22 @@ public class ProductsController : ControllerBase
 {
     private readonly IProductService _productService;
     private readonly IWebHostEnvironment _environment;
+    private readonly ITelegramNotificationService _telegramService;
 
     /// <summary>
     /// Initializes a new instance of the ProductsController class
     /// </summary>
     /// <param name="productService">Service for product operations</param>
     /// <param name="environment">Web hosting environment</param>
-    public ProductsController(IProductService productService, IWebHostEnvironment environment)
+    /// <param name="telegramService">Service for Telegram notifications</param>
+    public ProductsController(
+        IProductService productService, 
+        IWebHostEnvironment environment,
+        ITelegramNotificationService telegramService)
     {
         _productService = productService;
         _environment = environment;
+        _telegramService = telegramService;
     }
 
     /// <summary>
@@ -175,6 +181,71 @@ public class ProductsController : ControllerBase
             }
             
             var product = await _productService.CreateProductAsync(dto, imagePaths);
+            
+            // If PublishedAt is specified, send product to Telegram channel
+            if (dto.PublishedAt.HasValue)
+            {
+                try
+                {
+                    // Format message like in frontend
+                    var caption = $"🛍️ {product.Name}\n";
+                    if (!string.IsNullOrEmpty(product.Brand))
+                        caption += $"🏷️ Бренд: {product.Brand}\n";
+                    if (!string.IsNullOrEmpty(product.Size))
+                        caption += $"📏 Размер: {product.Size}\n";
+                    if (!string.IsNullOrEmpty(product.Color))
+                        caption += $"🎨 Цвет: {product.Color}\n";
+                    if (!string.IsNullOrEmpty(product.Gender))
+                        caption += $"👤 Пол: {product.Gender}\n";
+                    if (!string.IsNullOrEmpty(product.Condition))
+                        caption += $"✨ Состояние: {product.Condition}\n";
+                    if (!string.IsNullOrEmpty(product.Description))
+                        caption += $"\n📝 {product.Description}\n";
+                    caption += $"\n💰 Цена: {product.Price:N0} ₽\n";
+                    
+                    // Build image URLs
+                    var imageUrls = new List<string>();
+                    if (product.Images != null && product.Images.Any())
+                    {
+                        var baseUrl = $"{Request.Scheme}://{Request.Host}";
+                        foreach (var imagePath in product.Images)
+                        {
+                            if (string.IsNullOrEmpty(imagePath)) continue;
+                            
+                            string fullUrl;
+                            if (imagePath.StartsWith("http"))
+                            {
+                                fullUrl = imagePath;
+                            }
+                            else if (imagePath.StartsWith("/"))
+                            {
+                                fullUrl = $"{baseUrl}{imagePath}";
+                            }
+                            else
+                            {
+                                fullUrl = $"{baseUrl}/{imagePath.TrimStart('/')}";
+                            }
+                            imageUrls.Add(fullUrl);
+                        }
+                    }
+                    
+                    // Send to channel
+                    if (imageUrls.Any())
+                    {
+                        await _telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls);
+                    }
+                    else
+                    {
+                        await _telegramService.SendMessageToChannelAsync(caption);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Log error but don't fail product creation
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Error sending product to channel: {ex.Message}");
+                }
+            }
+            
             return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
         }
         catch (Exception ex)
