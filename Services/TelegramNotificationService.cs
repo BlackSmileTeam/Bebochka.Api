@@ -760,7 +760,7 @@ public class TelegramNotificationService : ITelegramNotificationService
     }
 
     /// <summary>
-    /// Pre-caches product images in Telegram for fast publish at scheduled time.
+    /// Pre-caches product images in Telegram for fast publish (uploads to storage chat and saves file_id).
     /// </summary>
     public async Task PreCacheProductImagesAsync(int productId, string baseUrl)
     {
@@ -772,9 +772,7 @@ public class TelegramNotificationService : ITelegramNotificationService
         var product = await _context.Products.FindAsync(productId);
         if (product == null || product.Images == null || product.Images.Count == 0)
             return;
-        var moscowNow = Bebochka.Api.Helpers.DateTimeHelper.GetMoscowTime();
-        if (product.PublishedAt == null || product.PublishedAt <= moscowNow)
-            return;
+        // If file_ids already cached for all images, skip
         if (product.TelegramFileIds != null && product.TelegramFileIds.Count == product.Images.Count)
             return;
         var imageUrls = new List<string>();

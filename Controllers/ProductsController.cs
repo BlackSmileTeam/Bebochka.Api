@@ -182,9 +182,8 @@ public class ProductsController : ControllerBase
             
             var product = await _productService.CreateProductAsync(dto, imagePaths);
             
-            // Предзагрузка фото в кэш Telegram для отложенной публикации (в фоне)
-            var moscowNow = DateTimeHelper.GetMoscowTime();
-            if (product.PublishedAt.HasValue && product.PublishedAt.Value > moscowNow && product.Images != null && product.Images.Count > 0)
+            // Предзагрузка фото в кэш Telegram сразу после создания карточки (в фоне)
+            if (product.Images != null && product.Images.Count > 0)
             {
                 var baseUrl = $"{Request.Scheme}://{Request.Host}";
                 _ = Task.Run(async () =>
@@ -351,9 +350,8 @@ public class ProductsController : ControllerBase
             if (product == null)
                 return NotFound();
 
-            // Предзагрузка фото в кэш Telegram для отложенной публикации (в фоне)
-            var moscowNowUpdate = DateTimeHelper.GetMoscowTime();
-            if (product.PublishedAt.HasValue && product.PublishedAt.Value > moscowNowUpdate && product.Images != null && product.Images.Count > 0)
+            // Предзагрузка фото в кэш Telegram после изменения карточки (в фоне)
+            if (product.Images != null && product.Images.Count > 0)
             {
                 var baseUrl = $"{Request.Scheme}://{Request.Host}";
                 var productId = product.Id;
