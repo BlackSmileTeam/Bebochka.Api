@@ -182,6 +182,18 @@ public class ProductsController : ControllerBase
             
             var product = await _productService.CreateProductAsync(dto, imagePaths);
             
+            // Предзагрузка фото в кэш Telegram для отложенной публикации (в фоне)
+            var moscowNow = DateTimeHelper.GetMoscowTime();
+            if (product.PublishedAt.HasValue && product.PublishedAt.Value > moscowNow && product.Images != null && product.Images.Count > 0)
+            {
+                var baseUrl = $"{Request.Scheme}://{Request.Host}";
+                _ = Task.Run(async () =>
+                {
+                    try { await _telegramService.PreCacheProductImagesAsync(product.Id, baseUrl); }
+                    catch (Exception ex) { Console.WriteLine($"[PreCache] Error: {ex.Message}"); }
+                });
+            }
+            
             // If PublishedAt is specified, send product to Telegram channel
             if (dto.PublishedAt.HasValue)
             {
@@ -338,6 +350,19 @@ public class ProductsController : ControllerBase
             var product = await _productService.UpdateProductAsync(id, dto, imagePaths);
             if (product == null)
                 return NotFound();
+
+            // Предзагрузка фото в кэш Telegram для отложенной публикации (в фоне)
+            var moscowNowUpdate = DateTimeHelper.GetMoscowTime();
+            if (product.PublishedAt.HasValue && product.PublishedAt.Value > moscowNowUpdate && product.Images != null && product.Images.Count > 0)
+            {
+                var baseUrl = $"{Request.Scheme}://{Request.Host}";
+                var productId = product.Id;
+                _ = Task.Run(async () =>
+                {
+                    try { await _telegramService.PreCacheProductImagesAsync(productId, baseUrl); }
+                    catch (Exception ex) { Console.WriteLine($"[PreCache] Error: {ex.Message}"); }
+                });
+            }
 
             return Ok(product);
         }

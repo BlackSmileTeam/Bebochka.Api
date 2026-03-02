@@ -45,11 +45,30 @@ public interface ITelegramNotificationService
     Task<bool> SendMessageToChannelAsync(string message);
     
     /// <summary>
-    /// Sends a message with photos to a Telegram channel
+    /// Sends a message with photos to a Telegram channel.
+    /// When telegramFileIds is provided (same count as imageUrls), photos are sent by file_id (no re-upload).
     /// </summary>
     /// <param name="message">Message text to send (caption for photos)</param>
-    /// <param name="imageUrls">List of image URLs to send</param>
+    /// <param name="imageUrls">List of image URLs (used when telegramFileIds is not used)</param>
+    /// <param name="telegramFileIds">Optional list of Telegram file_id; when set, skips download and upload</param>
     /// <returns>True if message was sent successfully</returns>
-    Task<bool> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls);
+    Task<bool> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null);
+    
+    /// <summary>
+    /// Uploads a photo to the configured storage chat and returns its file_id for later reuse.
+    /// Requires TelegramBot:StorageChatId to be set (e.g. a private channel).
+    /// </summary>
+    /// <param name="imageBytes">Photo bytes</param>
+    /// <param name="extension">File extension, e.g. .jpg</param>
+    /// <returns>file_id or null if upload failed or StorageChatId is not set</returns>
+    Task<string?> UploadPhotoToCacheAsync(byte[] imageBytes, string extension);
+    
+    /// <summary>
+    /// Pre-caches product images in Telegram (upload to storage chat, save file_id).
+    /// Call in background after creating/updating a product with future PublishedAt.
+    /// </summary>
+    /// <param name="productId">Product ID</param>
+    /// <param name="baseUrl">Base URL for building image URLs (e.g. https://yoursite.com)</param>
+    Task PreCacheProductImagesAsync(int productId, string baseUrl);
 }
 

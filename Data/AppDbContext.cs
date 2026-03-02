@@ -75,6 +75,8 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Price).HasColumnType("decimal(10,2)");
             entity.Property(e => e.ImagesJson).HasColumnName("Images");
             entity.Ignore(e => e.Images);
+            entity.Property(e => e.TelegramFileIdsJson).HasColumnName("TelegramFileIds");
+            entity.Ignore(e => e.TelegramFileIds);
             entity.Property(e => e.PublishedAt);
             entity.HasIndex(e => e.PublishedAt);
         });

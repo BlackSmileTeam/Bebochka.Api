@@ -24,6 +24,7 @@ public class TelegramNotificationService : ITelegramNotificationService
     private readonly string _botToken;
     private readonly string _botApiUrl;
     private readonly string? _channelId;
+    private readonly string? _storageChatId;
 
     public TelegramNotificationService(
         HttpClient httpClient,
@@ -47,11 +48,12 @@ public class TelegramNotificationService : ITelegramNotificationService
         _botToken = tokenFromConfig;
         _botApiUrl = $"https://api.telegram.org/bot{_botToken}";
         _channelId = configuration["TelegramBot:ChannelId"];
+        _storageChatId = configuration["TelegramBot:StorageChatId"];
         
         // Log token presence (but not the actual token for security)
-        _logger.LogInformation("TelegramNotificationService initialized. Bot token configured: {TokenPresent}, Channel ID configured: {ChannelIdPresent}, Channel ID value: {ChannelIdValue}", 
+        _logger.LogInformation("TelegramNotificationService initialized. Bot token configured: {TokenPresent}, Channel ID configured: {ChannelIdPresent}, StorageChatId (for cache): {StoragePresent}", 
             !string.IsNullOrEmpty(_botToken), !string.IsNullOrEmpty(_channelId), 
-            string.IsNullOrEmpty(_channelId) ? "EMPTY" : _channelId);
+            !string.IsNullOrEmpty(_storageChatId));
         
         if (string.IsNullOrWhiteSpace(_channelId))
         {
@@ -365,9 +367,10 @@ public class TelegramNotificationService : ITelegramNotificationService
     }
 
     /// <summary>
-    /// Sends a message with photos to a Telegram channel
+    /// Sends a message with photos to a Telegram channel.
+    /// When telegramFileIds is provided (same count as imageUrls), sends by file_id without re-upload.
     /// </summary>
-    public async Task<bool> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls)
+    public async Task<bool> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null)
     {
         try
         {
@@ -387,6 +390,13 @@ public class TelegramNotificationService : ITelegramNotificationService
             {
                 // Если нет изображений, отправляем только текст
                 return await SendMessageToChannelAsync(message);
+            }
+
+            // Если есть предзагруженные file_id — отправляем из кэша Telegram (без скачивания и загрузки)
+            if (telegramFileIds != null && telegramFileIds.Count == imageUrls.Count && telegramFileIds.All(f => !string.IsNullOrWhiteSpace(f)))
+            {
+                _logger.LogInformation("Sending {Count} photos to channel by file_id (from cache)", telegramFileIds.Count);
+                return await SendMessageToChannelWithPhotoFileIdsAsync(message, telegramFileIds);
             }
 
             // Log message details for debugging
@@ -627,6 +637,178 @@ public class TelegramNotificationService : ITelegramNotificationService
             
             // On error, do NOT send message, only log
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Sends a message with photos to the channel using pre-cached Telegram file_id (no upload).
+    /// </summary>
+    private async Task<bool> SendMessageToChannelWithPhotoFileIdsAsync(string message, List<string> fileIds)
+    {
+        if (fileIds.Count == 1)
+        {
+            var url = $"{_botApiUrl}/sendPhoto";
+            using var content = new MultipartFormDataContent();
+            content.Add(new StringContent(_channelId!), "chat_id");
+            content.Add(new StringContent(fileIds[0]), "photo");
+            if (!string.IsNullOrWhiteSpace(message))
+            {
+                content.Add(new StringContent(message), "caption");
+                content.Add(new StringContent("HTML"), "parse_mode");
+            }
+            var response = await ExecuteWithRetryAsync(
+                async (ct) => await _httpClient.PostAsync(url, content, ct),
+                $"Send photo by file_id to channel {_channelId}",
+                3
+            );
+            if (!response.IsSuccessStatusCode)
+            {
+                var err = await response.Content.ReadAsStringAsync();
+                _logger.LogError("Failed to send photo by file_id. Status: {Status}, Error: {Error}", response.StatusCode, err);
+                await SaveErrorToDatabase(new Exception($"HTTP {response.StatusCode}: {err}"), message, 1, "ApiError");
+                return false;
+            }
+            _logger.LogInformation("Photo sent to channel by file_id");
+            return true;
+        }
+
+        var mediaGroupUrl = $"{_botApiUrl}/sendMediaGroup";
+        var mediaArray = new List<Dictionary<string, object>>();
+        for (int i = 0; i < fileIds.Count; i++)
+        {
+            var mediaObj = new Dictionary<string, object> { { "type", "photo" }, { "media", fileIds[i] } };
+            if (i == fileIds.Count - 1 && !string.IsNullOrWhiteSpace(message))
+            {
+                mediaObj["caption"] = message;
+                mediaObj["parse_mode"] = "HTML";
+            }
+            mediaArray.Add(mediaObj);
+        }
+        var opts = new System.Text.Json.JsonSerializerOptions { WriteIndented = false };
+        var json = System.Text.Json.JsonSerializer.Serialize(mediaArray, opts);
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(_channelId!), "chat_id");
+        form.Add(new StringContent(json), "media");
+        var mediaResponse = await ExecuteWithRetryAsync(
+            async (ct) => await _httpClient.PostAsync(mediaGroupUrl, form, ct),
+            $"Send media group by file_id to channel {_channelId}",
+            3
+        );
+        if (!mediaResponse.IsSuccessStatusCode)
+        {
+            var err = await mediaResponse.Content.ReadAsStringAsync();
+            _logger.LogError("Failed to send media group by file_id. Status: {Status}, Error: {Error}", mediaResponse.StatusCode, err);
+            await SaveErrorToDatabase(new Exception($"HTTP {mediaResponse.StatusCode}: {err}"), message, fileIds.Count, "ApiError");
+            return false;
+        }
+        _logger.LogInformation("Media group sent to channel by file_id ({Count} photos)", fileIds.Count);
+        return true;
+    }
+
+    /// <summary>
+    /// Uploads a photo to the storage chat and returns its file_id for later reuse.
+    /// </summary>
+    public async Task<string?> UploadPhotoToCacheAsync(byte[] imageBytes, string extension)
+    {
+        if (string.IsNullOrWhiteSpace(_storageChatId) || string.IsNullOrWhiteSpace(_botToken))
+        {
+            _logger.LogDebug("UploadPhotoToCache skipped: StorageChatId or Bot token not set");
+            return null;
+        }
+        try
+        {
+            var url = $"{_botApiUrl}/sendPhoto";
+            using var content = new MultipartFormDataContent();
+            content.Add(new StringContent(_storageChatId), "chat_id");
+            content.Add(new StringContent("true"), "disable_notification");
+            content.Add(new ByteArrayContent(imageBytes), "photo", $"photo{extension}");
+            var response = await _httpClient.PostAsync(url, content);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("UploadPhotoToCache failed. Status: {Status}", response.StatusCode);
+                return null;
+            }
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("result", out var result) || result.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return null;
+            if (!result.TryGetProperty("photo", out var photoArr) || photoArr.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return null;
+            string? fileId = null;
+            int maxSize = 0;
+            foreach (var photo in photoArr.EnumerateArray())
+            {
+                if (photo.TryGetProperty("file_size", out var fs) && fs.TryGetInt32(out var size) && size > maxSize
+                    && photo.TryGetProperty("file_id", out var fid))
+                {
+                    maxSize = size;
+                    fileId = fid.GetString();
+                }
+                else if (photo.TryGetProperty("file_id", out var fid2))
+                    fileId ??= fid2.GetString();
+            }
+            if (!string.IsNullOrEmpty(fileId))
+                _logger.LogDebug("UploadPhotoToCache: got file_id");
+            return fileId;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "UploadPhotoToCache failed");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Pre-caches product images in Telegram for fast publish at scheduled time.
+    /// </summary>
+    public async Task PreCacheProductImagesAsync(int productId, string baseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(_storageChatId))
+        {
+            _logger.LogDebug("PreCacheProductImages skipped: StorageChatId not set");
+            return;
+        }
+        var product = await _context.Products.FindAsync(productId);
+        if (product == null || product.Images == null || product.Images.Count == 0)
+            return;
+        var moscowNow = Bebochka.Api.Helpers.DateTimeHelper.GetMoscowTime();
+        if (product.PublishedAt == null || product.PublishedAt <= moscowNow)
+            return;
+        if (product.TelegramFileIds != null && product.TelegramFileIds.Count == product.Images.Count)
+            return;
+        var imageUrls = new List<string>();
+        foreach (var path in product.Images)
+        {
+            if (string.IsNullOrEmpty(path)) continue;
+            var url = path.StartsWith("http") ? path : (path.StartsWith("/") ? $"{baseUrl.TrimEnd('/')}{path}" : $"{baseUrl.TrimEnd('/')}/{path.TrimStart('/')}");
+            imageUrls.Add(url);
+        }
+        if (imageUrls.Count == 0) return;
+        var fileIds = new List<string>();
+        foreach (var imageUrl in imageUrls)
+        {
+            try
+            {
+                var response = await _httpClient.GetAsync(imageUrl);
+                if (!response.IsSuccessStatusCode) continue;
+                var bytes = await response.Content.ReadAsByteArrayAsync();
+                var ext = System.IO.Path.GetExtension(new Uri(imageUrl).AbsolutePath);
+                if (string.IsNullOrEmpty(ext)) ext = ".jpg";
+                var fileId = await UploadPhotoToCacheAsync(bytes, ext);
+                if (!string.IsNullOrEmpty(fileId))
+                    fileIds.Add(fileId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "PreCacheProductImages: failed to process {Url}", imageUrl);
+            }
+        }
+        if (fileIds.Count == product.Images.Count)
+        {
+            product.TelegramFileIds = fileIds;
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("PreCacheProductImages: saved {Count} file_id for product {ProductId}", fileIds.Count, productId);
         }
     }
 

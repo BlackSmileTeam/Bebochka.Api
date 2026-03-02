@@ -429,11 +429,12 @@ public class TelegramController : ControllerBase
                         }
                     }
 
-                    // Send to channel
+                    // Send to channel (use pre-cached file_id if available — быстрее, без повторной загрузки)
                     bool success;
                     if (imageUrls.Any())
                     {
-                        success = await _telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls);
+                        var fileIds = product.TelegramFileIds;
+                        success = await _telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls, fileIds);
                     }
                     else
                     {
