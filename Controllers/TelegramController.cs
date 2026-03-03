@@ -322,20 +322,20 @@ public class TelegramController : ControllerBase
 
         try
         {
-            bool success;
+            var result = new ChannelSendResult { Success = false };
             if (request.ImageUrls != null && request.ImageUrls.Count > 0)
             {
-                success = await _telegramService.SendMessageToChannelWithPhotosAsync(request.Message, request.ImageUrls);
+                result = await _telegramService.SendMessageToChannelWithPhotosAsync(request.Message, request.ImageUrls);
             }
             else
             {
-                success = await _telegramService.SendMessageToChannelAsync(request.Message);
+                result = await _telegramService.SendMessageToChannelAsync(request.Message);
             }
             
             return Ok(new SendMessageResponseDto
             {
-                Success = success,
-                Message = success ? "Message sent successfully to channel" : "Failed to send message to channel"
+                Success = result.Success,
+                Message = result.Success ? "Message sent successfully to channel" : "Failed to send message to channel"
             });
         }
         catch (Exception ex)
@@ -430,19 +430,19 @@ public class TelegramController : ControllerBase
                     }
 
                     // Send to channel (use pre-cached file_id if available — быстрее, без повторной загрузки)
-                    bool success;
+                    ChannelSendResult sendResult;
                     if (imageUrls.Any())
                     {
                         var fileIds = product.TelegramFileIds;
-                        success = await _telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls, fileIds);
+                        sendResult = await _telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls, fileIds);
                     }
                     else
                     {
-                        success = await _telegramService.SendMessageToChannelAsync(caption);
+                        sendResult = await _telegramService.SendMessageToChannelAsync(caption);
                     }
 
                     // Update PublishedAt immediately after successful send for real-time progress tracking
-                    if (success)
+                    if (sendResult.Success)
                     {
                         // Use a separate scope to avoid concurrency issues with parallel updates
                         using var scope = _serviceScopeFactory.CreateScope();
@@ -452,9 +452,11 @@ public class TelegramController : ControllerBase
                         {
                             productToUpdate.PublishedAt = moscowNow;
                             productToUpdate.UpdatedAt = DateTime.UtcNow;
+                            productToUpdate.TelegramMessageId = sendResult.MessageId;
+                            productToUpdate.TelegramChatId = sendResult.ChatId;
                             await scopedContext.SaveChangesAsync();
-                            _logger.LogInformation("Product {ProductId} ({ProductName}) successfully sent and PublishedAt updated", 
-                                product.Id, product.Name);
+                            _logger.LogInformation("Product {ProductId} ({ProductName}) sent and post linked: MessageId={MessageId}, ChatId={ChatId}", 
+                                product.Id, product.Name, sendResult.MessageId, sendResult.ChatId);
                         }
                     }
 
@@ -462,7 +464,7 @@ public class TelegramController : ControllerBase
                     {
                         ProductId = product.Id,
                         ProductName = product.Name,
-                        Success = success
+                        Success = sendResult.Success
                     };
                 }
                 catch (Exception ex)

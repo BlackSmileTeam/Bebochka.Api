@@ -62,3 +62,26 @@ public class CreateOrderItemDto
     public int Quantity { get; set; }
 }
 
+/// <summary>
+/// Request for reserving a product from a Telegram channel post comment.
+/// </summary>
+public class ReserveFromTelegramRequestDto
+{
+    public string ChannelId { get; set; } = string.Empty;
+    public int MessageId { get; set; }
+    public long TelegramUserId { get; set; }
+    public string? Username { get; set; }
+    public string? FirstName { get; set; }
+    public string? LastName { get; set; }
+}
+
+/// <summary>
+/// Result of reserve-from-telegram.
+/// </summary>
+public class ReserveFromTelegramResultDto
+{
+    public bool Success { get; set; }
+    public OrderDto? Order { get; set; }
+    public string? Reason { get; set; }
+}
+

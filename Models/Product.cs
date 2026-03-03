@@ -108,4 +108,15 @@ public class Product
     /// If null, product is published immediately
     /// </summary>
     public DateTime? PublishedAt { get; set; }
+
+    /// <summary>
+    /// Telegram channel message ID of the post (for linking comments/reservations).
+    /// </summary>
+    public int? TelegramMessageId { get; set; }
+
+    /// <summary>
+    /// Telegram channel/chat ID (e.g. -1001234567890) where the product was posted.
+    /// Stored as string to avoid issues with different ID formats.
+    /// </summary>
+    public string? TelegramChatId { get; set; }
 }

@@ -78,7 +78,10 @@ public class AppDbContext : DbContext
             entity.Property(e => e.TelegramFileIdsJson).HasColumnName("TelegramFileIds");
             entity.Ignore(e => e.TelegramFileIds);
             entity.Property(e => e.PublishedAt);
+            entity.Property(e => e.TelegramMessageId);
+            entity.Property(e => e.TelegramChatId).HasMaxLength(50);
             entity.HasIndex(e => e.PublishedAt);
+            entity.HasIndex(e => new { e.TelegramChatId, e.TelegramMessageId });
         });
 
         modelBuilder.Entity<User>(entity =>

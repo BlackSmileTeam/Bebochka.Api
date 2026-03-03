@@ -214,6 +214,67 @@ public class OrderService : IOrderService
         };
     }
 
+    public async Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName)
+    {
+        var product = await _context.Products
+            .FirstOrDefaultAsync(p => p.TelegramChatId == channelId && p.TelegramMessageId == messageId);
+        if (product == null)
+            return new ReserveFromTelegramResultDto { Success = false, Reason = "ProductNotFound" };
+
+        var activeStatuses = new[] { "Ожидает оплату", "В сборке", "В пути", "Доставлен" };
+        var alreadyReserved = await _context.OrderItems
+            .AnyAsync(oi => oi.ProductId == product.Id && _context.Orders.Any(o => o.Id == oi.OrderId && activeStatuses.Contains(o.Status)));
+        if (alreadyReserved)
+            return new ReserveFromTelegramResultDto { Success = false, Reason = "AlreadyReserved" };
+
+        if (product.QuantityInStock < 1)
+            return new ReserveFromTelegramResultDto { Success = false, Reason = "OutOfStock" };
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.TelegramUserId == telegramUserId);
+        if (user == null)
+            return new ReserveFromTelegramResultDto { Success = false, Reason = "UserNotFound" };
+
+        var customerName = $"{firstName ?? ""} {lastName ?? ""}".Trim();
+        if (string.IsNullOrEmpty(customerName))
+            customerName = username ?? $"TG_{telegramUserId}";
+
+        var orderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
+        var orderItem = new OrderItem
+        {
+            ProductId = product.Id,
+            ProductName = product.Name,
+            ProductPrice = product.Price,
+            Quantity = 1
+        };
+        var order = new Order
+        {
+            OrderNumber = orderNumber,
+            UserId = user.Id,
+            CustomerName = customerName,
+            CustomerPhone = "",
+            CustomerEmail = user.Email,
+            TotalAmount = product.Price,
+            Status = "Ожидает оплату",
+            OrderItems = new List<OrderItem> { orderItem },
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+        product.QuantityInStock -= 1;
+        _context.Orders.Add(order);
+        await _context.SaveChangesAsync();
+
+        try
+        {
+            await _emailService.SendOrderNotificationAsync(order);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Failed to send order email for telegram reserve: {ex.Message}");
+        }
+
+        return new ReserveFromTelegramResultDto { Success = true, Order = MapToDto(order, user) };
+    }
+
     private static OrderDto MapToDto(Order order, User? user = null)
     {
         return new OrderDto

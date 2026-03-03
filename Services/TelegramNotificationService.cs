@@ -287,26 +287,26 @@ public class TelegramNotificationService : ITelegramNotificationService
     /// <summary>
     /// Sends a message to a Telegram channel
     /// </summary>
-    public async Task<bool> SendMessageToChannelAsync(string message)
+    public async Task<ChannelSendResult> SendMessageToChannelAsync(string message)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(_botToken))
             {
                 _logger.LogError("Cannot send message to channel: Bot token is empty");
-                return false;
+                return new ChannelSendResult { Success = false };
             }
 
             if (string.IsNullOrWhiteSpace(_channelId))
             {
                 _logger.LogError("Cannot send message to channel: Channel ID is not configured. Please set TelegramBot__ChannelId environment variable or TelegramBot:ChannelId in appsettings.json");
-                return false;
+                return new ChannelSendResult { Success = false };
             }
 
             if (string.IsNullOrWhiteSpace(message))
             {
                 _logger.LogWarning("Attempted to send empty message to channel");
-                return false;
+                return new ChannelSendResult { Success = false };
             }
 
             // Log message details for debugging
@@ -341,9 +341,11 @@ public class TelegramNotificationService : ITelegramNotificationService
             
             if (response.IsSuccessStatusCode)
             {
+                var json = await response.Content.ReadAsStringAsync();
+                var (msgId, chatId) = ParseMessageIdAndChatIdFromResponse(json, isArray: false);
                 _logger.LogInformation("Message sent successfully to channel {ChannelId}. Full message: {Message}", 
                     _channelId, message);
-                return true;
+                return new ChannelSendResult { Success = true, MessageId = msgId, ChatId = chatId ?? _channelId };
             }
             else
             {
@@ -355,35 +357,58 @@ public class TelegramNotificationService : ITelegramNotificationService
                     message, 
                     0, 
                     "ApiError");
-                return false;
+                return new ChannelSendResult { Success = false };
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Exception while sending message to channel {ChannelId} after retries", _channelId);
             await SaveErrorToDatabase(ex, message, 0, "Exception");
-            return false;
+            return new ChannelSendResult { Success = false };
         }
+    }
+
+    private static (int? MessageId, string? ChatId) ParseMessageIdAndChatIdFromResponse(string json, bool isArray)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (!root.TryGetProperty("result", out var result))
+                return (null, null);
+            if (isArray && result.ValueKind == System.Text.Json.JsonValueKind.Array && result.GetArrayLength() > 0)
+                result = result[0];
+            if (result.ValueKind != System.Text.Json.JsonValueKind.Object)
+                return (null, null);
+            int? msgId = null;
+            if (result.TryGetProperty("message_id", out var mid))
+                msgId = mid.GetInt32();
+            string? chatId = null;
+            if (result.TryGetProperty("chat", out var chat) && chat.TryGetProperty("id", out var cid))
+                chatId = cid.ValueKind == System.Text.Json.JsonValueKind.Number ? cid.GetInt64().ToString() : cid.GetString();
+            return (msgId, chatId);
+        }
+        catch { return (null, null); }
     }
 
     /// <summary>
     /// Sends a message with photos to a Telegram channel.
     /// When telegramFileIds is provided (same count as imageUrls), sends by file_id without re-upload.
     /// </summary>
-    public async Task<bool> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null)
+    public async Task<ChannelSendResult> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null)
     {
         try
         {
             if (string.IsNullOrWhiteSpace(_botToken))
             {
                 _logger.LogError("Cannot send message to channel: Bot token is empty");
-                return false;
+                return new ChannelSendResult { Success = false };
             }
 
             if (string.IsNullOrWhiteSpace(_channelId))
             {
                 _logger.LogError("Cannot send message to channel: Channel ID is not configured. Please set TelegramBot__ChannelId environment variable or TelegramBot:ChannelId in appsettings.json");
-                return false;
+                return new ChannelSendResult { Success = false };
             }
 
             if (imageUrls == null || imageUrls.Count == 0)
@@ -455,7 +480,7 @@ public class TelegramNotificationService : ITelegramNotificationService
                 // Если не удалось скачать изображения, логируем ошибку и не отправляем сообщение
                 _logger.LogError("Failed to download any images from {Count} URLs. Message will NOT be sent to channel {ChannelId}. Image URLs: {ImageUrls}", 
                     imageUrls.Count, _channelId, string.Join(", ", imageUrls));
-                return false;
+                return new ChannelSendResult { Success = false };
             }
 
             // Если одно изображение, отправляем через sendPhoto
@@ -484,9 +509,11 @@ public class TelegramNotificationService : ITelegramNotificationService
                     
                     if (response.IsSuccessStatusCode)
                     {
+                        var respJson = await response.Content.ReadAsStringAsync();
+                        var (msgId, chatId) = ParseMessageIdAndChatIdFromResponse(respJson, isArray: false);
                         _logger.LogInformation("Photo sent successfully to channel {ChannelId}. Caption: {Caption}", 
                             _channelId, message ?? "No caption");
-                        return true;
+                        return new ChannelSendResult { Success = true, MessageId = msgId, ChatId = chatId ?? _channelId };
                     }
                     else
                     {
@@ -498,7 +525,7 @@ public class TelegramNotificationService : ITelegramNotificationService
                             message, 
                             1, 
                             "ApiError");
-                        return false;
+                        return new ChannelSendResult { Success = false };
                     }
                 }
                 catch (Exception ex)
@@ -506,7 +533,7 @@ public class TelegramNotificationService : ITelegramNotificationService
                     _logger.LogError(ex, "Exception while sending photo to channel {ChannelId} after retries. Error: {Message}", 
                         _channelId, ex.Message);
                     await SaveErrorToDatabase(ex, message, 1, "Exception");
-                    return false;
+                    return new ChannelSendResult { Success = false };
                 }
             }
 
@@ -587,7 +614,8 @@ public class TelegramNotificationService : ITelegramNotificationService
                     var responseContent = await mediaResponse.Content.ReadAsStringAsync();
                     _logger.LogInformation("Media group sent successfully to channel {ChannelId}. Response: {Response}, Caption: {Caption}", 
                         _channelId, responseContent, message ?? "No caption");
-                    return true;
+                    var (msgId, chatId) = ParseMessageIdAndChatIdFromResponse(responseContent, isArray: true);
+                    return new ChannelSendResult { Success = true, MessageId = msgId, ChatId = chatId ?? _channelId };
                 }
                 else
                 {
@@ -599,7 +627,7 @@ public class TelegramNotificationService : ITelegramNotificationService
                         message, 
                         images.Count, 
                         "ApiError");
-                    return false;
+                    return new ChannelSendResult { Success = false };
                 }
             }
             catch (TaskCanceledException tce)
@@ -607,14 +635,14 @@ public class TelegramNotificationService : ITelegramNotificationService
                 _logger.LogError(tce, "TaskCanceledException while sending media group to channel {ChannelId}. Message: {Message}, Images count: {Count}", 
                     _channelId, tce.Message, images.Count);
                 await SaveErrorToDatabase(tce, message, images.Count, "Timeout");
-                return false;
+                return new ChannelSendResult { Success = false };
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Exception while sending media group to channel {ChannelId} after retries. Exception type: {Type}, Message: {Message}, StackTrace: {StackTrace}, Images count: {Count}", 
                     _channelId, ex.GetType().Name, ex.Message, ex.StackTrace, images.Count);
                 await SaveErrorToDatabase(ex, message, images.Count, "Exception");
-                return false;
+                return new ChannelSendResult { Success = false };
             }
         }
         catch (Exception ex)
@@ -636,14 +664,14 @@ public class TelegramNotificationService : ITelegramNotificationService
             }
             
             // On error, do NOT send message, only log
-            return false;
+            return new ChannelSendResult { Success = false };
         }
     }
 
     /// <summary>
     /// Sends a message with photos to the channel using pre-cached Telegram file_id (no upload).
     /// </summary>
-    private async Task<bool> SendMessageToChannelWithPhotoFileIdsAsync(string message, List<string> fileIds)
+    private async Task<ChannelSendResult> SendMessageToChannelWithPhotoFileIdsAsync(string message, List<string> fileIds)
     {
         if (fileIds.Count == 1)
         {
@@ -666,10 +694,12 @@ public class TelegramNotificationService : ITelegramNotificationService
                 var err = await response.Content.ReadAsStringAsync();
                 _logger.LogError("Failed to send photo by file_id. Status: {Status}, Error: {Error}", response.StatusCode, err);
                 await SaveErrorToDatabase(new Exception($"HTTP {response.StatusCode}: {err}"), message, 1, "ApiError");
-                return false;
+                return new ChannelSendResult { Success = false };
             }
-            _logger.LogInformation("Photo sent to channel by file_id");
-            return true;
+            var respJson = await response.Content.ReadAsStringAsync();
+            var (msgId, chatId) = ParseMessageIdAndChatIdFromResponse(respJson, isArray: false);
+            _logger.LogInformation("Photo sent to channel by file_id. MessageId: {MessageId}", msgId);
+            return new ChannelSendResult { Success = true, MessageId = msgId, ChatId = chatId ?? _channelId };
         }
 
         var mediaGroupUrl = $"{_botApiUrl}/sendMediaGroup";
@@ -699,10 +729,12 @@ public class TelegramNotificationService : ITelegramNotificationService
             var err = await mediaResponse.Content.ReadAsStringAsync();
             _logger.LogError("Failed to send media group by file_id. Status: {Status}, Error: {Error}", mediaResponse.StatusCode, err);
             await SaveErrorToDatabase(new Exception($"HTTP {mediaResponse.StatusCode}: {err}"), message, fileIds.Count, "ApiError");
-            return false;
+            return new ChannelSendResult { Success = false };
         }
-        _logger.LogInformation("Media group sent to channel by file_id ({Count} photos)", fileIds.Count);
-        return true;
+        var mediaRespJson = await mediaResponse.Content.ReadAsStringAsync();
+        var (mId, cId) = ParseMessageIdAndChatIdFromResponse(mediaRespJson, isArray: true);
+        _logger.LogInformation("Media group sent to channel by file_id ({Count} photos). MessageId: {MessageId}", fileIds.Count, mId);
+        return new ChannelSendResult { Success = true, MessageId = mId, ChatId = cId ?? _channelId };
     }
 
     /// <summary>

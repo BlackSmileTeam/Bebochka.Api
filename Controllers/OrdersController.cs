@@ -165,6 +165,30 @@ public class OrdersController : ControllerBase
         var statistics = await _orderService.GetStatisticsAsync();
         return Ok(statistics);
     }
+
+    /// <summary>
+    /// Reserves a product from a Telegram channel post (first allowed comment).
+    /// </summary>
+    [HttpPost("reserve-from-telegram")]
+    [ProducesResponseType(typeof(ReserveFromTelegramResultDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<ReserveFromTelegramResultDto>> ReserveFromTelegram([FromBody] ReserveFromTelegramRequestDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.ChannelId))
+            return BadRequest(new ReserveFromTelegramResultDto { Success = false, Reason = "ChannelId required" });
+        if (dto.MessageId <= 0)
+            return BadRequest(new ReserveFromTelegramResultDto { Success = false, Reason = "MessageId required" });
+        if (dto.TelegramUserId <= 0)
+            return BadRequest(new ReserveFromTelegramResultDto { Success = false, Reason = "TelegramUserId required" });
+
+        var result = await _orderService.ReserveFromTelegramAsync(
+            dto.ChannelId,
+            dto.MessageId,
+            dto.TelegramUserId,
+            dto.Username,
+            dto.FirstName,
+            dto.LastName);
+        return Ok(result);
+    }
 }
 
 public class CancelOrderDto

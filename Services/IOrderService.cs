@@ -55,5 +55,10 @@ public interface IOrderService
     /// </summary>
     /// <returns>Statistics</returns>
     Task<OrderStatisticsDto> GetStatisticsAsync();
+
+    /// <summary>
+    /// Reserves a product from a Telegram channel post (first allowed comment).
+    /// </summary>
+    Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName);
 }
 

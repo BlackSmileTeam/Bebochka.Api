@@ -1,6 +1,16 @@
 namespace Bebochka.Api.Services;
 
 /// <summary>
+/// Result of sending a message to a Telegram channel (for linking post to product).
+/// </summary>
+public class ChannelSendResult
+{
+    public bool Success { get; set; }
+    public int? MessageId { get; set; }
+    public string? ChatId { get; set; }
+}
+
+/// <summary>
 /// Service interface for sending notifications via Telegram
 /// </summary>
 public interface ITelegramNotificationService
@@ -41,8 +51,8 @@ public interface ITelegramNotificationService
     /// Sends a message to a Telegram channel
     /// </summary>
     /// <param name="message">Message text to send</param>
-    /// <returns>True if message was sent successfully</returns>
-    Task<bool> SendMessageToChannelAsync(string message);
+    /// <returns>Result with Success and MessageId/ChatId for linking to product</returns>
+    Task<ChannelSendResult> SendMessageToChannelAsync(string message);
     
     /// <summary>
     /// Sends a message with photos to a Telegram channel.
@@ -51,8 +61,8 @@ public interface ITelegramNotificationService
     /// <param name="message">Message text to send (caption for photos)</param>
     /// <param name="imageUrls">List of image URLs (used when telegramFileIds is not used)</param>
     /// <param name="telegramFileIds">Optional list of Telegram file_id; when set, skips download and upload</param>
-    /// <returns>True if message was sent successfully</returns>
-    Task<bool> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null);
+    /// <returns>Result with Success and MessageId/ChatId for linking to product</returns>
+    Task<ChannelSendResult> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null);
     
     /// <summary>
     /// Uploads a photo to the configured storage chat and returns its file_id for later reuse.
