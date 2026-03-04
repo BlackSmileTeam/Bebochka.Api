@@ -16,22 +16,19 @@ public class ProductsController : ControllerBase
 {
     private readonly IProductService _productService;
     private readonly IWebHostEnvironment _environment;
-    private readonly ITelegramNotificationService _telegramService;
+    private readonly IServiceScopeFactory _scopeFactory;
 
     /// <summary>
     /// Initializes a new instance of the ProductsController class
     /// </summary>
-    /// <param name="productService">Service for product operations</param>
-    /// <param name="environment">Web hosting environment</param>
-    /// <param name="telegramService">Service for Telegram notifications</param>
     public ProductsController(
-        IProductService productService, 
+        IProductService productService,
         IWebHostEnvironment environment,
-        ITelegramNotificationService telegramService)
+        IServiceScopeFactory scopeFactory)
     {
         _productService = productService;
         _environment = environment;
-        _telegramService = telegramService;
+        _scopeFactory = scopeFactory;
     }
 
     /// <summary>
@@ -181,70 +178,60 @@ public class ProductsController : ControllerBase
             }
             
             var product = await _productService.CreateProductAsync(dto, imagePaths);
+
+            // Ответ сразу после записи в БД. Пользователь получает ответ и может готовить следующую карточку.
+            // Загрузка фото в кэш Telegram и отправка в канал — в фоне, в отдельном scope (не используем scoped-сервисы запроса).
             var baseUrl = $"{Request.Scheme}://{Request.Host}";
-
-            // Всё, что связано с Telegram — только в фоне, после того как карточка уже в БД
-            if (product.Images != null && product.Images.Count > 0)
+            var scopeFactory = _scopeFactory;
+            var productId = product.Id;
+            var hasImages = product.Images != null && product.Images.Count > 0;
+            var publishToChannel = dto.PublishedAt.HasValue;
+            string? caption = null;
+            List<string>? imageUrls = null;
+            if (publishToChannel)
             {
-                var productId = product.Id;
-                _ = Task.Run(async () =>
-                {
-                    try { await _telegramService.PreCacheProductImagesAsync(productId, baseUrl); }
-                    catch (Exception ex) { Console.WriteLine($"[PreCache] Error: {ex.Message}"); }
-                });
-            }
-
-            // Отправка в канал при указанном PublishedAt — в фоне, не блокируем ответ
-            if (dto.PublishedAt.HasValue)
-            {
-                var caption = $"🛍️ {product.Name}\n";
-                if (!string.IsNullOrEmpty(product.Brand))
-                    caption += $"🏷️ Бренд: {product.Brand}\n";
-                if (!string.IsNullOrEmpty(product.Size))
-                    caption += $"📏 Размер: {product.Size}\n";
-                if (!string.IsNullOrEmpty(product.Color))
-                    caption += $"🎨 Цвет: {product.Color}\n";
-                if (!string.IsNullOrEmpty(product.Gender))
-                    caption += $"👤 Пол: {product.Gender}\n";
-                if (!string.IsNullOrEmpty(product.Condition))
-                    caption += $"✨ Состояние: {product.Condition}\n";
-                if (!string.IsNullOrEmpty(product.Description))
-                    caption += $"\n📝 {product.Description}\n";
+                caption = $"🛍️ {product.Name}\n";
+                if (!string.IsNullOrEmpty(product.Brand)) caption += $"🏷️ Бренд: {product.Brand}\n";
+                if (!string.IsNullOrEmpty(product.Size)) caption += $"📏 Размер: {product.Size}\n";
+                if (!string.IsNullOrEmpty(product.Color)) caption += $"🎨 Цвет: {product.Color}\n";
+                if (!string.IsNullOrEmpty(product.Gender)) caption += $"👤 Пол: {product.Gender}\n";
+                if (!string.IsNullOrEmpty(product.Condition)) caption += $"✨ Состояние: {product.Condition}\n";
+                if (!string.IsNullOrEmpty(product.Description)) caption += $"\n📝 {product.Description}\n";
                 caption += $"\n💰 Цена: {product.Price:N0} ₽\n";
-
-                var imageUrls = new List<string>();
                 if (product.Images != null && product.Images.Any())
                 {
+                    imageUrls = new List<string>();
                     foreach (var imagePath in product.Images)
                     {
                         if (string.IsNullOrEmpty(imagePath)) continue;
-                        string fullUrl;
-                        if (imagePath.StartsWith("http"))
-                            fullUrl = imagePath;
-                        else if (imagePath.StartsWith("/"))
-                            fullUrl = $"{baseUrl}{imagePath}";
-                        else
-                            fullUrl = $"{baseUrl}/{imagePath.TrimStart('/')}";
-                        imageUrls.Add(fullUrl);
+                        if (imagePath.StartsWith("http")) imageUrls.Add(imagePath);
+                        else if (imagePath.StartsWith("/")) imageUrls.Add($"{baseUrl}{imagePath}");
+                        else imageUrls.Add($"{baseUrl}/{imagePath.TrimStart('/')}");
                     }
                 }
+            }
 
-                var telegramService = _telegramService;
-                _ = Task.Run(async () =>
+            _ = Task.Run(async () =>
+            {
+                using var scope = scopeFactory.CreateScope();
+                var telegramService = scope.ServiceProvider.GetRequiredService<ITelegramNotificationService>();
+                try
                 {
-                    try
+                    if (hasImages)
+                        await telegramService.PreCacheProductImagesAsync(productId, baseUrl);
+                    if (publishToChannel && caption != null)
                     {
-                        if (imageUrls.Any())
+                        if (imageUrls != null && imageUrls.Count > 0)
                             await telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls);
                         else
                             await telegramService.SendMessageToChannelAsync(caption);
                     }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Error sending product to channel: {ex.Message}");
-                    }
-                });
-            }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Background Telegram error: {ex.Message}");
+                }
+            });
 
             return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
         }
@@ -339,14 +326,20 @@ public class ProductsController : ControllerBase
             if (product == null)
                 return NotFound();
 
-            // Предзагрузка фото в кэш Telegram после изменения карточки (в фоне)
+            // Предзагрузка фото в кэш Telegram — в фоне, в отдельном scope
             if (product.Images != null && product.Images.Count > 0)
             {
                 var baseUrl = $"{Request.Scheme}://{Request.Host}";
                 var productId = product.Id;
+                var scopeFactory = _scopeFactory;
                 _ = Task.Run(async () =>
                 {
-                    try { await _telegramService.PreCacheProductImagesAsync(productId, baseUrl); }
+                    try
+                    {
+                        using var scope = scopeFactory.CreateScope();
+                        var telegramService = scope.ServiceProvider.GetRequiredService<ITelegramNotificationService>();
+                        await telegramService.PreCacheProductImagesAsync(productId, baseUrl);
+                    }
                     catch (Exception ex) { Console.WriteLine($"[PreCache] Error: {ex.Message}"); }
                 });
             }
