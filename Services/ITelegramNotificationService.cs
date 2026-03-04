@@ -29,6 +29,16 @@ public interface ITelegramNotificationService
     /// <param name="message">Message text to send</param>
     /// <returns>True if message was sent successfully</returns>
     Task<bool> SendMessageAsync(long chatId, string message);
+
+    /// <summary>
+    /// Deletes a message in a Telegram chat (e.g. user's "беру" comment when item is removed from order).
+    /// </summary>
+    Task<bool> DeleteMessageAsync(long chatId, int messageId);
+
+    /// <summary>
+    /// Sends one or more photos to a user by URLs (downloads then sends). Used e.g. for "В сборке" product cards.
+    /// </summary>
+    Task<bool> SendPhotosToUserByUrlsAsync(long chatId, List<string> imageUrls, string? caption = null);
     
     /// <summary>
     /// Sends a photo with caption to a specific Telegram user by chat ID

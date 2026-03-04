@@ -197,6 +197,8 @@ builder.Services.AddAuthentication(options =>
 
 builder.Services.AddAuthorization();
 
+        builder.Services.AddHttpContextAccessor();
+
         // Add services
         builder.Services.AddScoped<IProductService, ProductService>();
         builder.Services.AddScoped<IAuthService, AuthService>();

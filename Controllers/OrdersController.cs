@@ -202,8 +202,23 @@ public class OrdersController : ControllerBase
             dto.Username,
             dto.FirstName,
             dto.LastName,
-            dto.CustomerPhone);
+            dto.CustomerPhone,
+            dto.CommentChatId,
+            dto.CommentMessageId);
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Removes an item from an order. Deletes user's Telegram comment, restores stock, optionally assigns product to next user from reserve queue.
+    /// </summary>
+    [HttpDelete("{orderId}/items/{itemId}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> DeleteOrderItem(int orderId, int itemId)
+    {
+        var ok = await _orderService.DeleteOrderItemAsync(orderId, itemId);
+        if (!ok) return NotFound();
+        return NoContent();
     }
 }
 

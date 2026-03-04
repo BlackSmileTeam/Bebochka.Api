@@ -35,6 +35,11 @@ public class OrderItemDto
     public string ProductName { get; set; } = string.Empty;
     public decimal ProductPrice { get; set; }
     public int Quantity { get; set; }
+    public string? Size { get; set; }
+    public string? Color { get; set; }
+    public string? Brand { get; set; }
+    /// <summary>URL or path to first product image (for mini photo in admin).</summary>
+    public string? ImageUrl { get; set; }
 }
 
 /// <summary>
@@ -75,6 +80,10 @@ public class ReserveFromTelegramRequestDto
     public string? LastName { get; set; }
     /// <summary>Телефон, если пользователь поделился контактом в Telegram.</summary>
     public string? CustomerPhone { get; set; }
+    /// <summary>Chat ID сообщения с фразой «беру» (для удаления при снятии товара с заказа).</summary>
+    public long? CommentChatId { get; set; }
+    /// <summary>Message ID сообщения с фразой «беру».</summary>
+    public int? CommentMessageId { get; set; }
 }
 
 /// <summary>

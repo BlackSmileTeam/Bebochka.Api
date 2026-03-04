@@ -57,6 +57,11 @@ public class AppDbContext : DbContext
     public DbSet<TelegramError> TelegramErrors { get; set; }
 
     /// <summary>
+    /// Gets or sets the ReserveQueue database set (очередь «беру» при уже забронированном товаре)
+    /// </summary>
+    public DbSet<ReserveQueue> ReserveQueue { get; set; }
+
+    /// <summary>
     /// Configures the entity models and their relationships
     /// </summary>
     /// <param name="modelBuilder">Model builder instance</param>
@@ -129,6 +134,8 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.ProductName).IsRequired().HasMaxLength(255);
             entity.Property(e => e.ProductPrice).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.TelegramCommentChatId);
+            entity.Property(e => e.TelegramCommentMessageId);
             entity.HasOne(e => e.Order)
                 .WithMany(o => o.OrderItems)
                 .HasForeignKey(e => e.OrderId)
@@ -137,6 +144,22 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ReserveQueue>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ChannelId).IsRequired().HasMaxLength(50);
+            entity.Property(e => e.Username).HasMaxLength(255);
+            entity.Property(e => e.FirstName).HasMaxLength(255);
+            entity.Property(e => e.LastName).HasMaxLength(255);
+            entity.Property(e => e.CustomerPhone).HasMaxLength(50);
+            entity.HasIndex(e => e.ProductId);
+            entity.HasIndex(e => new { e.ChannelId, e.PostMessageId });
+            entity.HasOne(e => e.Product)
+                .WithMany()
+                .HasForeignKey(e => e.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Announcement>(entity =>

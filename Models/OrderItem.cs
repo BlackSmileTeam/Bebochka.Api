@@ -49,5 +49,15 @@ public class OrderItem
     /// Gets or sets the date and time when the order item was created
     /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Telegram chat ID of the user's "беру" comment (to delete when item is removed from order).
+    /// </summary>
+    public long? TelegramCommentChatId { get; set; }
+
+    /// <summary>
+    /// Telegram message ID of the user's "беру" comment.
+    /// </summary>
+    public int? TelegramCommentMessageId { get; set; }
 }
 

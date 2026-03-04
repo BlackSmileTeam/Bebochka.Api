@@ -12,11 +12,15 @@ public class OrderService : IOrderService
 {
     private readonly AppDbContext _context;
     private readonly IEmailService _emailService;
+    private readonly ITelegramNotificationService _telegramService;
+    private readonly IHttpContextAccessor _httpContextAccessor;
 
-    public OrderService(AppDbContext context, IEmailService emailService)
+    public OrderService(AppDbContext context, IEmailService emailService, ITelegramNotificationService telegramService, IHttpContextAccessor httpContextAccessor)
     {
         _context = context;
         _emailService = emailService;
+        _telegramService = telegramService;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     public async Task<OrderDto> CreateOrderAsync(CreateOrderDto dto)
@@ -101,6 +105,7 @@ public class OrderService : IOrderService
     {
         var orders = await _context.Orders
             .Include(o => o.OrderItems)
+            .ThenInclude(oi => oi.Product)
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
 
@@ -117,6 +122,7 @@ public class OrderService : IOrderService
     {
         var order = await _context.Orders
             .Include(o => o.OrderItems)
+            .ThenInclude(oi => oi.Product)
             .FirstOrDefaultAsync(o => o.Id == id);
 
         if (order == null)
@@ -135,6 +141,7 @@ public class OrderService : IOrderService
     {
         var orders = await _context.Orders
             .Include(o => o.OrderItems)
+            .ThenInclude(oi => oi.Product)
             .Where(o => o.UserId == userId)
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
@@ -194,6 +201,57 @@ public class OrderService : IOrderService
         }
 
         await _context.SaveChangesAsync();
+
+        var user = order.UserId.HasValue ? await _context.Users.FindAsync(order.UserId.Value) : null;
+        var telegramUserId = user?.TelegramUserId;
+        if (telegramUserId.HasValue)
+        {
+            var statusText = status switch
+            {
+                "В сборке" => "в сборке",
+                "Ожидает оплату" => "ожидает оплату",
+                "В пути" => "в пути",
+                "Доставлен" => "доставлен",
+                "Отменен" => "отменён",
+                _ => status
+            };
+            await _telegramService.SendMessageAsync(telegramUserId.Value,
+                $"<b>Статус заказа {order.OrderNumber} изменён</b>\nНовый статус: {statusText}.");
+
+            if (status == "В сборке")
+            {
+                var orderWithItems = await _context.Orders
+                    .Include(o => o.OrderItems)
+                    .ThenInclude(oi => oi.Product)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+                if (orderWithItems?.OrderItems != null)
+                {
+                    var req = _httpContextAccessor.HttpContext?.Request;
+                    var baseUrl = req != null ? $"{req.Scheme}://{req.Host}" : null;
+                    if (!string.IsNullOrEmpty(baseUrl))
+                    {
+                        foreach (var oi in orderWithItems.OrderItems.Where(oi => oi.Product != null))
+                        {
+                            var p = oi.Product!;
+                            var imagePaths = p.Images ?? new List<string>();
+                            var imageUrls = imagePaths
+                                .Select(path => path.StartsWith("http") ? path : (path.StartsWith("/") ? $"{baseUrl.TrimEnd('/')}{path}" : $"{baseUrl.TrimEnd('/')}/{path.TrimStart('/')}"))
+                                .ToList();
+                            if (imageUrls.Count > 0)
+                            {
+                                var caption = $"<b>{p.Name}</b>";
+                                if (!string.IsNullOrEmpty(p.Brand)) caption += $"\nБренд: {p.Brand}";
+                                if (!string.IsNullOrEmpty(p.Size)) caption += $"\nРазмер: {p.Size}";
+                                if (!string.IsNullOrEmpty(p.Color)) caption += $"\nЦвет: {p.Color}";
+                                caption += $"\nЦена: {p.Price:N0} ₽";
+                                await _telegramService.SendPhotosToUserByUrlsAsync(telegramUserId.Value, imageUrls, caption);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         return true;
     }
 
@@ -226,7 +284,115 @@ public class OrderService : IOrderService
         return true;
     }
 
-    public async Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName, string? customerPhone = null)
+    public async Task<bool> DeleteOrderItemAsync(int orderId, int itemId)
+    {
+        var item = await _context.OrderItems
+            .Include(oi => oi.Order)
+            .Include(oi => oi.Product)
+            .FirstOrDefaultAsync(oi => oi.OrderId == orderId && oi.Id == itemId);
+        if (item == null || item.Order == null || item.Product == null)
+            return false;
+
+        if (item.TelegramCommentChatId.HasValue && item.TelegramCommentMessageId.HasValue)
+        {
+            try
+            {
+                await _telegramService.DeleteMessageAsync(item.TelegramCommentChatId.Value, item.TelegramCommentMessageId.Value);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"DeleteOrderItem: failed to delete Telegram comment: {ex.Message}");
+            }
+        }
+
+        var order = item.Order;
+        var product = item.Product;
+        // Остаток не трогаем для заказов через канал (при брони из канала мы его не уменьшали)
+        if (!item.TelegramCommentChatId.HasValue)
+            product.QuantityInStock += item.Quantity;
+        order.TotalAmount -= item.ProductPrice * item.Quantity;
+        order.UpdatedAt = DateTime.UtcNow;
+        _context.OrderItems.Remove(item);
+
+        var nextQueue = await _context.ReserveQueue
+            .Where(rq => rq.ProductId == product.Id)
+            .OrderBy(rq => rq.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (nextQueue != null)
+        {
+            var nextUser = await _context.Users.FirstOrDefaultAsync(u => u.TelegramUserId == nextQueue.TelegramUserId);
+            if (nextUser != null)
+            {
+                var customerName = $"{nextQueue.FirstName ?? ""} {nextQueue.LastName ?? ""}".Trim();
+                if (string.IsNullOrEmpty(customerName))
+                    customerName = !string.IsNullOrEmpty(nextQueue.Username) ? $"@{nextQueue.Username}" : nextUser.FullName ?? nextUser.Username ?? $"Telegram {nextQueue.TelegramUserId}";
+                var phone = nextQueue.CustomerPhone ?? "";
+
+                var newOrderItem = new OrderItem
+                {
+                    ProductId = product.Id,
+                    ProductName = product.Name,
+                    ProductPrice = product.Price,
+                    Quantity = 1,
+                    TelegramCommentChatId = nextQueue.CommentChatId != 0 ? nextQueue.CommentChatId : null,
+                    TelegramCommentMessageId = nextQueue.CommentMessageId != 0 ? nextQueue.CommentMessageId : null
+                };
+
+                var existingOrder = await _context.Orders
+                    .Include(o => o.OrderItems)
+                    .Where(o => o.UserId == nextUser.Id && o.Status == "Ожидает оплату")
+                    .OrderByDescending(o => o.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                if (existingOrder != null)
+                {
+                    existingOrder.OrderItems.Add(newOrderItem);
+                    existingOrder.TotalAmount += product.Price;
+                    existingOrder.CustomerName = customerName;
+                    if (!string.IsNullOrWhiteSpace(phone)) existingOrder.CustomerPhone = phone;
+                    existingOrder.UpdatedAt = DateTime.UtcNow;
+                }
+                else
+                {
+                    var orderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
+                    var newOrder = new Order
+                    {
+                        OrderNumber = orderNumber,
+                        UserId = nextUser.Id,
+                        CustomerName = customerName,
+                        CustomerPhone = phone,
+                        CustomerEmail = nextUser.Email,
+                        TotalAmount = product.Price,
+                        Status = "Ожидает оплату",
+                        OrderItems = new List<OrderItem> { newOrderItem },
+                        CreatedAt = DateTime.UtcNow,
+                        UpdatedAt = DateTime.UtcNow
+                    };
+                    _context.Orders.Add(newOrder);
+                }
+                // При передаче следующему в очереди остаток не уменьшаем (заказы через канал не меняют остаток)
+                _context.ReserveQueue.Remove(nextQueue);
+            }
+            else
+            {
+                _context.ReserveQueue.Remove(nextQueue);
+            }
+        }
+
+        await _context.SaveChangesAsync();
+
+        var itemsLeft = await _context.OrderItems.CountAsync(oi => oi.OrderId == orderId);
+        if (itemsLeft == 0)
+        {
+            _context.Orders.Remove(order);
+            await _context.SaveChangesAsync();
+        }
+
+        return true;
+    }
+
+    public async Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName, string? customerPhone = null, long? commentChatId = null, int? commentMessageId = null)
     {
         var product = await _context.Products
             .FirstOrDefaultAsync(p => p.TelegramChatId == channelId && p.TelegramMessageId == messageId);
@@ -237,14 +403,53 @@ public class OrderService : IOrderService
         var alreadyReserved = await _context.OrderItems
             .AnyAsync(oi => oi.ProductId == product.Id && _context.Orders.Any(o => o.Id == oi.OrderId && activeStatuses.Contains(o.Status)));
         if (alreadyReserved)
+        {
+            var queueEntry = new ReserveQueue
+            {
+                ProductId = product.Id,
+                ChannelId = channelId,
+                PostMessageId = messageId,
+                TelegramUserId = telegramUserId,
+                Username = username,
+                FirstName = firstName,
+                LastName = lastName,
+                CustomerPhone = customerPhone,
+                CommentChatId = commentChatId ?? 0,
+                CommentMessageId = commentMessageId ?? 0,
+                CreatedAt = DateTime.UtcNow
+            };
+            if (commentChatId.HasValue && commentMessageId.HasValue)
+            {
+                queueEntry.CommentChatId = commentChatId.Value;
+                queueEntry.CommentMessageId = commentMessageId.Value;
+            }
+            _context.ReserveQueue.Add(queueEntry);
+            await _context.SaveChangesAsync();
             return new ReserveFromTelegramResultDto { Success = false, Reason = "AlreadyReserved" };
+        }
 
-        if (product.QuantityInStock < 1)
-            return new ReserveFromTelegramResultDto { Success = false, Reason = "OutOfStock" };
-
+        // Бронировать может только один пользователь, товар один — остаток не проверяем и не уменьшаем.
+        // Пользователь: если есть в базе — берём его; если нет — создаём (товар попадает в существующий заказ в начальном статусе или создаётся новый).
         var user = await _context.Users.FirstOrDefaultAsync(u => u.TelegramUserId == telegramUserId);
         if (user == null)
-            return new ReserveFromTelegramResultDto { Success = false, Reason = "UserNotFound" };
+        {
+            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var newUsername = $"telegram_{telegramUserId}_{timestamp}";
+            user = new User
+            {
+                Username = newUsername,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString()),
+                TelegramUserId = telegramUserId,
+                FullName = $"{firstName ?? ""} {lastName ?? ""}".Trim(),
+                IsActive = true,
+                IsAdmin = false,
+                CreatedAt = DateTime.UtcNow
+            };
+            if (string.IsNullOrWhiteSpace(user.FullName))
+                user.FullName = !string.IsNullOrEmpty(username) ? $"@{username}" : null;
+            _context.Users.Add(user);
+            await _context.SaveChangesAsync();
+        }
 
         // Имя заказчика: из Telegram (имя/фамилия или @username), иначе из профиля User
         var customerName = $"{firstName ?? ""} {lastName ?? ""}".Trim();
@@ -260,7 +465,9 @@ public class OrderService : IOrderService
             ProductId = product.Id,
             ProductName = product.Name,
             ProductPrice = product.Price,
-            Quantity = 1
+            Quantity = 1,
+            TelegramCommentChatId = commentChatId,
+            TelegramCommentMessageId = commentMessageId
         };
 
         // Если у пользователя уже есть заказ со статусом «Ожидает оплату» — добавляем товар в него
@@ -302,7 +509,7 @@ public class OrderService : IOrderService
             _context.Orders.Add(order);
         }
 
-        product.QuantityInStock -= 1;
+        // Количество на складе при оформлении заказа через канал не уменьшаем
         await _context.SaveChangesAsync();
 
         try
@@ -337,7 +544,11 @@ public class OrderService : IOrderService
                 ProductId = oi.ProductId,
                 ProductName = oi.ProductName,
                 ProductPrice = oi.ProductPrice,
-                Quantity = oi.Quantity
+                Quantity = oi.Quantity,
+                Size = oi.Product?.Size,
+                Color = oi.Product?.Color,
+                Brand = oi.Product?.Brand,
+                ImageUrl = oi.Product?.Images?.FirstOrDefault()
             }).ToList(),
             CreatedAt = order.CreatedAt,
             UpdatedAt = order.UpdatedAt,

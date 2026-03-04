@@ -63,6 +63,8 @@ public class TelegramWebhookController : ControllerBase
                 channelId, messageId.Value, from.Id);
 
             var phone = message.Contact?.PhoneNumber;
+            var commentChatId = message.Chat?.Id ?? 0;
+            var commentMessageId = message.MessageId;
             var result = await _orderService.ReserveFromTelegramAsync(
                 channelId,
                 messageId.Value,
@@ -70,7 +72,9 @@ public class TelegramWebhookController : ControllerBase
                 from.Username,
                 from.FirstName,
                 from.LastName,
-                customerPhone: phone);
+                customerPhone: phone,
+                commentChatId: commentChatId != 0 ? commentChatId : null,
+                commentMessageId: commentMessageId);
 
             // При обнаружении кодовой фразы ничего не пишем в чат — только создаём заказ при успехе
         }

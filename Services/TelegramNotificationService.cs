@@ -157,6 +157,117 @@ public class TelegramNotificationService : ITelegramNotificationService
     }
 
     /// <summary>
+    /// Deletes a message in a Telegram chat.
+    /// </summary>
+    public async Task<bool> DeleteMessageAsync(long chatId, int messageId)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_botToken))
+            {
+                _logger.LogError("Cannot delete message: Bot token is empty");
+                return false;
+            }
+            var url = $"{_botApiUrl}/deleteMessage";
+            var payload = new { chat_id = chatId, message_id = messageId };
+            var response = await _httpClient.PostAsJsonAsync(url, payload);
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogDebug("Message {MessageId} deleted in chat {ChatId}", messageId, chatId);
+                return true;
+            }
+            var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogWarning("Failed to delete message in chat {ChatId}. Status: {Status}, Error: {Error}", chatId, response.StatusCode, errorContent);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Exception while deleting message in chat {ChatId}", chatId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Sends photos to a user by URLs (downloads then sends, e.g. for "В сборке" product cards).
+    /// </summary>
+    public async Task<bool> SendPhotosToUserByUrlsAsync(long chatId, List<string> imageUrls, string? caption = null)
+    {
+        if (imageUrls == null || imageUrls.Count == 0)
+        {
+            _logger.LogWarning("SendPhotosToUserByUrls: no image URLs");
+            return false;
+        }
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_botToken))
+            {
+                _logger.LogError("Cannot send photos: Bot token is empty");
+                return false;
+            }
+            var downloadTasks = imageUrls.Select(async imageUrl =>
+            {
+                try
+                {
+                    var imageResponse = await _httpClient.GetAsync(imageUrl);
+                    if (imageResponse.IsSuccessStatusCode)
+                    {
+                        var imageBytes = await imageResponse.Content.ReadAsByteArrayAsync();
+                        var extension = System.IO.Path.GetExtension(new Uri(imageUrl).AbsolutePath);
+                        if (string.IsNullOrEmpty(extension)) extension = ".jpg";
+                        return (Success: true, Bytes: imageBytes, Extension: extension);
+                    }
+                    return (Success: false, Bytes: (byte[]?)null, Extension: (string?)null);
+                }
+                catch
+                {
+                    return (Success: false, Bytes: (byte[]?)null, Extension: (string?)null);
+                }
+            });
+            var results = await Task.WhenAll(downloadTasks);
+            var images = results.Where(r => r.Success && r.Bytes != null).Select(r => (r.Bytes!, r.Extension!)).ToList();
+            if (images.Count == 0)
+            {
+                _logger.LogWarning("SendPhotosToUserByUrls: failed to download any image");
+                return false;
+            }
+            if (images.Count == 1)
+            {
+                var url = $"{_botApiUrl}/sendPhoto";
+                using var content = new MultipartFormDataContent();
+                content.Add(new StringContent(chatId.ToString()), "chat_id");
+                if (!string.IsNullOrWhiteSpace(caption))
+                {
+                    content.Add(new StringContent(caption), "caption");
+                    content.Add(new StringContent("HTML"), "parse_mode");
+                }
+                content.Add(new ByteArrayContent(images[0].Item1), "photo", $"photo{images[0].Item2}");
+                var response = await _httpClient.PostAsync(url, content);
+                return response.IsSuccessStatusCode;
+            }
+            var mediaGroupUrl = $"{_botApiUrl}/sendMediaGroup";
+            using var mediaContent = new MultipartFormDataContent();
+            mediaContent.Add(new StringContent(chatId.ToString()), "chat_id");
+            for (int i = 0; i < images.Count; i++)
+            {
+                var (bytes, ext) = images[i];
+                var inputName = i == 0 ? "photo" : $"photo{i}";
+                mediaContent.Add(new ByteArrayContent(bytes), inputName, $"photo{ext}");
+            }
+            var mediaResponse = await _httpClient.PostAsync(mediaGroupUrl, mediaContent);
+            if (mediaResponse.IsSuccessStatusCode && !string.IsNullOrWhiteSpace(caption))
+            {
+                await SendMessageAsync(chatId, caption);
+            }
+            return mediaResponse.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Exception while sending photos to user {ChatId}", chatId);
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Sends a photo with caption to a specific Telegram user by chat ID
     /// </summary>
     public async Task<bool> SendPhotoAsync(long chatId, string photoPath, string? caption = null)
