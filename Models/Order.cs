@@ -26,7 +26,7 @@ public class Order
     public string CustomerName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the link to customer profile or chat (e.g. tg://user?id=... or https://t.me/username)
+    /// Gets or sets the link to customer profile or chat (e.g. tg://openmessage?user_id=... or https://t.me/username)
     /// </summary>
     public string? CustomerProfileLink { get; set; }
     
@@ -61,7 +61,7 @@ public class Order
     public decimal TotalAmount { get; set; }
     
     /// <summary>
-    /// Gets or sets the order status (Формирование заказа, Ожидает оплату, В сборке, На доставке, Отправлен, Отменен)
+    /// Gets or sets the order status (Формирование заказа, Ожидает оплату, В сборке, На доставку, Отправлен, Отменен)
     /// </summary>
     public string Status { get; set; } = "Ожидает оплату";
 

@@ -1,4 +1,4 @@
--- Ссылка на профиль/чат клиента (tg://user?id=... или https://t.me/username)
+-- Ссылка на профиль/чат клиента (tg://openmessage?user_id=... или https://t.me/username)
 -- Выполнить: mysql -u root -p bebochka < add_order_customer_profile_link.sql
 
 USE bebochka;

@@ -8,7 +8,7 @@ public class OrderDto
     public int Id { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
     public string CustomerName { get; set; } = string.Empty;
-    /// <summary>Link to customer profile or chat (tg://user?id=... or https://t.me/username).</summary>
+    /// <summary>Link to customer profile or chat (tg://openmessage?user_id=... or https://t.me/username).</summary>
     public string? CustomerProfileLink { get; set; }
     public string CustomerPhone { get; set; } = string.Empty;
     public string? CustomerEmail { get; set; }

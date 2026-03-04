@@ -187,7 +187,7 @@ public class OrderService : IOrderService
 
     public async Task<bool> UpdateOrderStatusAsync(int orderId, string status)
     {
-        var validStatuses = new[] { "Формирование заказа", "Ожидает оплату", "В сборке", "На доставке", "Отправлен", "Отменен" };
+        var validStatuses = new[] { "Формирование заказа", "Ожидает оплату", "В сборке", "На доставку", "Отправлен", "Отменен" };
         if (!validStatuses.Contains(status))
             return false;
 
@@ -215,7 +215,7 @@ public class OrderService : IOrderService
                 "Формирование заказа" => "формирование заказа",
                 "Ожидает оплату" => "ожидает оплату",
                 "В сборке" => "в сборке",
-                "На доставке" => "на доставке",
+                "На доставку" => "на доставку",
                 "Отправлен" => "отправлен",
                 "Отменен" => "отменён",
                 _ => status
@@ -278,7 +278,7 @@ public class OrderService : IOrderService
             FormingOrders = orders.Count(o => o.Status == "Формирование заказа"),
             AwaitingPaymentOrders = orders.Count(o => o.Status == "Ожидает оплату"),
             PendingOrders = orders.Count(o => o.Status == "В сборке"),
-            OnDeliveryOrders = orders.Count(o => o.Status == "На доставке"),
+            OnDeliveryOrders = orders.Count(o => o.Status == "На доставку"),
             SentOrders = orders.Count(o => o.Status == "Отправлен"),
             CancelledOrders = orders.Count(o => o.Status == "Отменен"),
             TotalRevenue = orders.Where(o => o.Status == "Отправлен").Sum(o => GetFinalAmount(o)),
@@ -359,7 +359,7 @@ public class OrderService : IOrderService
                     .OrderByDescending(o => o.CreatedAt)
                     .FirstOrDefaultAsync();
 
-                var nextUserProfileLink = nextUser.TelegramUserId.HasValue ? "tg://user?id=" + nextUser.TelegramUserId.Value : null;
+                var nextUserProfileLink = nextUser.TelegramUserId.HasValue ? "tg://openmessage?user_id=" + nextUser.TelegramUserId.Value : null;
                 if (existingOrder != null)
                 {
                     existingOrder.OrderItems.Add(newOrderItem);
@@ -427,7 +427,7 @@ public class OrderService : IOrderService
         if (product == null)
             return new ReserveFromTelegramResultDto { Success = false, Reason = "ProductNotFound" };
 
-        var activeStatuses = new[] { "Ожидает оплату", "В сборке", "На доставке", "Отправлен" };
+        var activeStatuses = new[] { "Ожидает оплату", "В сборке", "На доставку", "Отправлен" };
         var alreadyReserved = await _context.OrderItems
             .AnyAsync(oi => oi.ProductId == product.Id && _context.Orders.Any(o => o.Id == oi.OrderId && activeStatuses.Contains(o.Status)));
         if (alreadyReserved)
@@ -490,7 +490,7 @@ public class OrderService : IOrderService
 
         var customerProfileLink = !string.IsNullOrEmpty(username)
             ? "https://t.me/" + username.TrimStart('@')
-            : "tg://user?id=" + telegramUserId;
+            : "tg://openmessage?user_id=" + telegramUserId;
 
         var orderItem = new OrderItem
         {
@@ -662,7 +662,7 @@ public class OrderService : IOrderService
             CancelledAt = order.CancelledAt,
             CancellationReason = order.CancellationReason,
             UserId = order.UserId,
-            CustomerProfileLink = order.CustomerProfileLink ?? (user?.TelegramUserId != null ? "tg://user?id=" + user.TelegramUserId : null),
+            CustomerProfileLink = order.CustomerProfileLink ?? (user?.TelegramUserId != null ? "tg://openmessage?user_id=" + user.TelegramUserId : null),
             TelegramUserId = user?.TelegramUserId,
             TelegramUsername = user != null ? (user.FullName ?? (user.Username != null && !user.Username.StartsWith("telegram_") ? user.Username : null)) ?? order.CustomerName : null
         };
