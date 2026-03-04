@@ -214,7 +214,19 @@ public class OrderService : IOrderService
         };
     }
 
-    public async Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName)
+    public async Task<bool> DeleteOrderAsync(int orderId)
+    {
+        var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .FirstOrDefaultAsync(o => o.Id == orderId);
+        if (order == null)
+            return false;
+        _context.Orders.Remove(order);
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName, string? customerPhone = null)
     {
         var product = await _context.Products
             .FirstOrDefaultAsync(p => p.TelegramChatId == channelId && p.TelegramMessageId == messageId);
@@ -243,7 +255,6 @@ public class OrderService : IOrderService
         if (string.IsNullOrEmpty(customerName))
             customerName = $"Telegram {telegramUserId}";
 
-        var orderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
         var orderItem = new OrderItem
         {
             ProductId = product.Id,
@@ -251,21 +262,47 @@ public class OrderService : IOrderService
             ProductPrice = product.Price,
             Quantity = 1
         };
-        var order = new Order
+
+        // Если у пользователя уже есть заказ со статусом «Ожидает оплату» — добавляем товар в него
+        var existingOrder = await _context.Orders
+            .Include(o => o.OrderItems)
+            .Where(o => o.UserId == user.Id && o.Status == "Ожидает оплату")
+            .OrderByDescending(o => o.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        Order order;
+        var phone = !string.IsNullOrWhiteSpace(customerPhone) ? customerPhone.Trim() : "";
+
+        if (existingOrder != null)
         {
-            OrderNumber = orderNumber,
-            UserId = user.Id,
-            CustomerName = customerName,
-            CustomerPhone = "",
-            CustomerEmail = user.Email,
-            TotalAmount = product.Price,
-            Status = "Ожидает оплату",
-            OrderItems = new List<OrderItem> { orderItem },
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
+            order = existingOrder;
+            order.OrderItems.Add(orderItem);
+            order.TotalAmount += product.Price;
+            order.CustomerName = customerName;
+            if (!string.IsNullOrEmpty(phone))
+                order.CustomerPhone = phone;
+            order.UpdatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            var orderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
+            order = new Order
+            {
+                OrderNumber = orderNumber,
+                UserId = user.Id,
+                CustomerName = customerName,
+                CustomerPhone = phone,
+                CustomerEmail = user.Email,
+                TotalAmount = product.Price,
+                Status = "Ожидает оплату",
+                OrderItems = new List<OrderItem> { orderItem },
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _context.Orders.Add(order);
+        }
+
         product.QuantityInStock -= 1;
-        _context.Orders.Add(order);
         await _context.SaveChangesAsync();
 
         try

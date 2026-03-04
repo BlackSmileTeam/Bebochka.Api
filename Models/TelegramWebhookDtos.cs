@@ -34,6 +34,10 @@ public class TelegramMessageDto
     [JsonPropertyName("reply_to_message")]
     public TelegramMessageDto? ReplyToMessage { get; set; }
 
+    /// <summary>Контакт, если пользователь поделился номером телефона.</summary>
+    [JsonPropertyName("contact")]
+    public TelegramContactDto? Contact { get; set; }
+
     // Legacy forwarding fields: used when comments идут из группы обсуждения
     [JsonPropertyName("forward_from_chat")]
     public TelegramChatDto? ForwardFromChat { get; set; }
@@ -68,5 +72,11 @@ public class TelegramUserDto
 
     [JsonPropertyName("last_name")]
     public string? LastName { get; set; }
+}
+
+public class TelegramContactDto
+{
+    [JsonPropertyName("phone_number")]
+    public string? PhoneNumber { get; set; }
 }
 

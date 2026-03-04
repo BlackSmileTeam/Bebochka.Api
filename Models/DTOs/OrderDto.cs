@@ -73,6 +73,8 @@ public class ReserveFromTelegramRequestDto
     public string? Username { get; set; }
     public string? FirstName { get; set; }
     public string? LastName { get; set; }
+    /// <summary>Телефон, если пользователь поделился контактом в Telegram.</summary>
+    public string? CustomerPhone { get; set; }
 }
 
 /// <summary>

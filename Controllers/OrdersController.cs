@@ -110,6 +110,21 @@ public class OrdersController : ControllerBase
     }
 
     /// <summary>
+    /// Deletes an order and its items from the database (admin only).
+    /// </summary>
+    [HttpDelete("{id}")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DeleteOrder(int id)
+    {
+        var deleted = await _orderService.DeleteOrderAsync(id);
+        if (!deleted)
+            return NotFound();
+        return NoContent();
+    }
+
+    /// <summary>
     /// Cancels an order
     /// </summary>
     [HttpPost("{id}/cancel")]
@@ -186,7 +201,8 @@ public class OrdersController : ControllerBase
             dto.TelegramUserId,
             dto.Username,
             dto.FirstName,
-            dto.LastName);
+            dto.LastName,
+            dto.CustomerPhone);
         return Ok(result);
     }
 }

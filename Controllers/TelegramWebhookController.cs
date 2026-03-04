@@ -14,16 +14,13 @@ public class TelegramWebhookController : ControllerBase
     private static readonly string[] ReserveWords = { "мне", "я", "беру", "бронь" };
 
     private readonly IOrderService _orderService;
-    private readonly ITelegramNotificationService _telegramService;
     private readonly ILogger<TelegramWebhookController> _logger;
 
     public TelegramWebhookController(
         IOrderService orderService,
-        ITelegramNotificationService telegramService,
         ILogger<TelegramWebhookController> logger)
     {
         _orderService = orderService;
-        _telegramService = telegramService;
         _logger = logger;
     }
 
@@ -65,32 +62,17 @@ public class TelegramWebhookController : ControllerBase
             _logger.LogInformation("ReserveFromTelegram attempt: ChannelId={ChannelId}, MessageId={MessageId}, TelegramUserId={UserId}",
                 channelId, messageId.Value, from.Id);
 
+            var phone = message.Contact?.PhoneNumber;
             var result = await _orderService.ReserveFromTelegramAsync(
                 channelId,
                 messageId.Value,
                 from.Id,
                 from.Username,
                 from.FirstName,
-                from.LastName);
+                from.LastName,
+                customerPhone: phone);
 
-            if (result.Success && result.Order != null)
-            {
-                // Отправляем пользователю личное сообщение от имени бота (через backend)
-                var msg = $"✅ Вы забронировали товар! Заказ №{result.Order.OrderNumber}, сумма {result.Order.TotalAmount:N0} ₽. Статус: Ожидает оплаты.";
-                await _telegramService.SendMessageAsync(from.Id, msg);
-            }
-            else
-            {
-                var reasonText = result.Reason switch
-                {
-                    "AlreadyReserved" => "Этот товар уже забронирован.",
-                    "UserNotFound" => "Напишите боту в личку /start, затем снова напишите «беру» под постом.",
-                    "ProductNotFound" => "Этот пост не привязан к товару.",
-                    "OutOfStock" => "Товар закончился.",
-                    _ => "Не удалось забронировать товар."
-                };
-                await _telegramService.SendMessageAsync(from.Id, $"❌ {reasonText}");
-            }
+            // При обнаружении кодовой фразы ничего не пишем в чат — только создаём заказ при успехе
         }
         catch (Exception ex)
         {

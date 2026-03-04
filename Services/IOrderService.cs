@@ -57,8 +57,15 @@ public interface IOrderService
     Task<OrderStatisticsDto> GetStatisticsAsync();
 
     /// <summary>
+    /// Deletes an order and its items from the database.
+    /// </summary>
+    /// <param name="orderId">Order ID</param>
+    /// <returns>True if deleted</returns>
+    Task<bool> DeleteOrderAsync(int orderId);
+
+    /// <summary>
     /// Reserves a product from a Telegram channel post (first allowed comment).
     /// </summary>
-    Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName);
+    Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName, string? customerPhone = null);
 }
 
