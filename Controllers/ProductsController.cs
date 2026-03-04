@@ -94,15 +94,17 @@ public class ProductsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<ProductDto>> CreateProduct([FromBody] CreateProductDto dto)
     {
+        var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             if (dto == null || string.IsNullOrEmpty(dto.Name))
             {
                 return BadRequest(new { message = "Product name is required" });
             }
-            
+
             var imagePaths = new List<string>();
-            
+            var contentStopwatch = System.Diagnostics.Stopwatch.StartNew();
+
             // Обрабатываем base64 изображения
             if (dto.Images != null && dto.Images.Any())
             {
@@ -176,8 +178,14 @@ public class ProductsController : ControllerBase
                     }
                 }
             }
-            
+
+            contentStopwatch.Stop();
+            var dbStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var product = await _productService.CreateProductAsync(dto, imagePaths);
+            dbStopwatch.Stop();
+
+            totalStopwatch.Stop();
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] CreateProduct: загрузка/обработка контента (декодирование и запись изображений) = {contentStopwatch.ElapsedMilliseconds} мс, сохранение в БД = {dbStopwatch.ElapsedMilliseconds} мс, всего в действии = {totalStopwatch.ElapsedMilliseconds} мс ({totalStopwatch.Elapsed.TotalSeconds:F2} с)");
 
             // Ответ сразу после записи в БД. Пользователь получает ответ и может готовить следующую карточку.
             // Загрузка фото в кэш Telegram и отправка в канал — в фоне, в отдельном scope (не используем scoped-сервисы запроса).
@@ -260,6 +268,7 @@ public class ProductsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<ProductDto>> UpdateProduct(int id, [FromBody] UpdateProductDto dto)
     {
+        var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             // Get existing product
@@ -268,6 +277,7 @@ public class ProductsController : ControllerBase
                 return NotFound();
 
             var imagePaths = new List<string>();
+            var contentStopwatch = System.Diagnostics.Stopwatch.StartNew();
 
             // Add existing images that should be preserved (sent from frontend)
             if (dto.ExistingImages != null && dto.ExistingImages.Any())
@@ -322,9 +332,15 @@ public class ProductsController : ControllerBase
                 }
             }
 
+            contentStopwatch.Stop();
+            var dbStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var product = await _productService.UpdateProductAsync(id, dto, imagePaths);
+            dbStopwatch.Stop();
             if (product == null)
                 return NotFound();
+
+            totalStopwatch.Stop();
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] UpdateProduct(id={id}): загрузка/обработка контента = {contentStopwatch.ElapsedMilliseconds} мс, сохранение в БД = {dbStopwatch.ElapsedMilliseconds} мс, всего в действии = {totalStopwatch.ElapsedMilliseconds} мс ({totalStopwatch.Elapsed.TotalSeconds:F2} с)");
 
             // Предзагрузка фото в кэш Telegram — в фоне, в отдельном scope
             if (product.Images != null && product.Images.Count > 0)

@@ -226,6 +226,22 @@ var app = builder.Build();
 // CORS must be very early in the pipeline, before UseRouting
 app.UseCors("AllowReactApp");
 
+// Логирование времени выполнения запросов (для создания/обновления карточек — полное время, включая загрузку тела)
+app.Use(async (context, next) =>
+{
+    var isProductWrite = (context.Request.Method == "POST" || context.Request.Method == "PUT")
+        && context.Request.Path.StartsWithSegments("/api/Products", StringComparison.OrdinalIgnoreCase);
+    if (isProductWrite)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await next(context);
+        sw.Stop();
+        Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [Request] {context.Request.Method} /api/Products выполнен за {sw.ElapsedMilliseconds} мс ({sw.Elapsed.TotalSeconds:F2} с)");
+    }
+    else
+        await next(context);
+});
+
 // Authentication and Authorization must be before UseRouting
 app.UseAuthentication();
 app.UseAuthorization();
