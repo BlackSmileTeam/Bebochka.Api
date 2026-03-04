@@ -234,9 +234,14 @@ public class OrderService : IOrderService
         if (user == null)
             return new ReserveFromTelegramResultDto { Success = false, Reason = "UserNotFound" };
 
+        // Имя заказчика: из Telegram (имя/фамилия или @username), иначе из профиля User
         var customerName = $"{firstName ?? ""} {lastName ?? ""}".Trim();
         if (string.IsNullOrEmpty(customerName))
-            customerName = username ?? $"TG_{telegramUserId}";
+            customerName = !string.IsNullOrEmpty(username) ? $"@{username}" : null;
+        if (string.IsNullOrEmpty(customerName))
+            customerName = user.FullName ?? user.Username;
+        if (string.IsNullOrEmpty(customerName))
+            customerName = $"Telegram {telegramUserId}";
 
         var orderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
         var orderItem = new OrderItem
@@ -303,7 +308,7 @@ public class OrderService : IOrderService
             CancellationReason = order.CancellationReason,
             UserId = order.UserId,
             TelegramUserId = user?.TelegramUserId,
-            TelegramUsername = user?.FullName // Используем FullName как имя пользователя для отображения
+            TelegramUsername = user != null ? (user.FullName ?? (user.Username != null && !user.Username.StartsWith("telegram_") ? user.Username : null)) ?? order.CustomerName : null
         };
     }
 }
