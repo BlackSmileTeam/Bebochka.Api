@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -7,7 +8,7 @@ using Bebochka.Api.Models;
 namespace Bebochka.Api.Controllers;
 
 /// <summary>
-/// Controller for managing Telegram channel sending errors
+/// Controller for managing Telegram channel sending errors and webhook diagnostics
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
@@ -16,11 +17,19 @@ public class TelegramErrorsController : ControllerBase
 {
     private readonly AppDbContext _context;
     private readonly ILogger<TelegramErrorsController> _logger;
+    private readonly IConfiguration _configuration;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public TelegramErrorsController(AppDbContext context, ILogger<TelegramErrorsController> logger)
+    public TelegramErrorsController(
+        AppDbContext context,
+        ILogger<TelegramErrorsController> logger,
+        IConfiguration configuration,
+        IHttpClientFactory httpClientFactory)
     {
         _context = context;
         _logger = logger;
+        _configuration = configuration;
+        _httpClientFactory = httpClientFactory;
     }
 
     /// <summary>
@@ -120,6 +129,99 @@ public class TelegramErrorsController : ControllerBase
             return StatusCode(500, new { message = "Failed to delete all errors" });
         }
     }
+
+    /// <summary>
+    /// Returns Telegram webhook diagnostics (getWebhookInfo) and suggested webhook URL for this API.
+    /// Token is not exposed to the client.
+    /// </summary>
+    [HttpGet("webhook-diagnostics")]
+    public async Task<ActionResult<TelegramWebhookDiagnosticsDto>> GetWebhookDiagnostics()
+    {
+        var token = _configuration["TelegramBot:Token"];
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return Ok(new TelegramWebhookDiagnosticsDto
+            {
+                Configured = false,
+                Error = "TelegramBot:Token не настроен",
+                SuggestedWebhookUrl = BuildSuggestedWebhookUrl()
+            });
+        }
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            var url = $"https://api.telegram.org/bot{token}/getWebhookInfo";
+            var response = await client.GetAsync(url);
+            var json = await response.Content.ReadAsStringAsync();
+
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            var ok = root.TryGetProperty("ok", out var okProp) && okProp.GetBoolean();
+            var result = root.TryGetProperty("result", out var resultProp) ? resultProp : (JsonElement?)null;
+
+            string? currentUrl = null;
+            int pendingUpdateCount = 0;
+            int? lastErrorDate = null;
+            string? lastErrorMessage = null;
+
+            if (result.HasValue && result.Value.ValueKind == JsonValueKind.Object)
+            {
+                var res = result.Value;
+                if (res.TryGetProperty("url", out var urlProp))
+                    currentUrl = urlProp.GetString();
+                if (res.TryGetProperty("pending_update_count", out var pendingProp))
+                    pendingUpdateCount = pendingProp.TryGetInt32(out var p) ? p : 0;
+                if (res.TryGetProperty("last_error_date", out var errDateProp) && errDateProp.ValueKind != JsonValueKind.Null)
+                    lastErrorDate = errDateProp.TryGetInt32(out var d) ? d : null;
+                if (res.TryGetProperty("last_error_message", out var errMsgProp))
+                    lastErrorMessage = errMsgProp.GetString();
+            }
+
+            return Ok(new TelegramWebhookDiagnosticsDto
+            {
+                Configured = true,
+                Ok = ok,
+                CurrentWebhookUrl = currentUrl ?? string.Empty,
+                PendingUpdateCount = pendingUpdateCount,
+                LastErrorDateUnix = lastErrorDate,
+                LastErrorMessage = lastErrorMessage ?? string.Empty,
+                SuggestedWebhookUrl = BuildSuggestedWebhookUrl()
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get Telegram webhook info");
+            return Ok(new TelegramWebhookDiagnosticsDto
+            {
+                Configured = true,
+                Error = ex.Message,
+                SuggestedWebhookUrl = BuildSuggestedWebhookUrl()
+            });
+        }
+    }
+
+    private string BuildSuggestedWebhookUrl()
+    {
+        var scheme = Request.Scheme;
+        var host = Request.Host.Value;
+        return $"{scheme}://{host}/api/Telegram/webhook";
+    }
+}
+
+/// <summary>
+/// DTO for Telegram webhook diagnostics (getWebhookInfo result + suggested URL)
+/// </summary>
+public class TelegramWebhookDiagnosticsDto
+{
+    public bool Configured { get; set; }
+    public bool Ok { get; set; }
+    public string? Error { get; set; }
+    public string CurrentWebhookUrl { get; set; } = string.Empty;
+    public int PendingUpdateCount { get; set; }
+    public int? LastErrorDateUnix { get; set; }
+    public string LastErrorMessage { get; set; } = string.Empty;
+    public string SuggestedWebhookUrl { get; set; } = string.Empty;
 }
 
 /// <summary>
