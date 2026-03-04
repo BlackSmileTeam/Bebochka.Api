@@ -98,7 +98,10 @@ public class OrderService : IOrderService
             Console.WriteLine($"Failed to send order email: {ex.Message}");
         }
 
-        return MapToDto(order);
+        User? user = null;
+        if (order.UserId.HasValue)
+            user = await _context.Users.FirstOrDefaultAsync(u => u.Id == order.UserId.Value);
+        return MapToDto(order, user);
     }
 
     public async Task<List<OrderDto>> GetAllOrdersAsync()
@@ -160,7 +163,7 @@ public class OrderService : IOrderService
         if (order == null)
             return false;
 
-        if (order.Status == "Доставлен" || order.Status == "Отменен")
+        if (order.Status == "Отправлен" || order.Status == "Отменен")
             return false;
 
         // Return products to stock
@@ -184,7 +187,7 @@ public class OrderService : IOrderService
 
     public async Task<bool> UpdateOrderStatusAsync(int orderId, string status)
     {
-        var validStatuses = new[] { "В сборке", "Ожидает оплату", "В пути", "Доставлен", "Отменен" };
+        var validStatuses = new[] { "Формирование заказа", "Ожидает оплату", "В сборке", "На доставке", "Отправлен", "Отменен" };
         if (!validStatuses.Contains(status))
             return false;
 
@@ -192,6 +195,7 @@ public class OrderService : IOrderService
         if (order == null)
             return false;
 
+        var previousStatus = order.Status;
         order.Status = status;
         order.UpdatedAt = DateTime.UtcNow;
 
@@ -208,15 +212,24 @@ public class OrderService : IOrderService
         {
             var statusText = status switch
             {
-                "В сборке" => "в сборке",
+                "Формирование заказа" => "формирование заказа",
                 "Ожидает оплату" => "ожидает оплату",
-                "В пути" => "в пути",
-                "Доставлен" => "доставлен",
+                "В сборке" => "в сборке",
+                "На доставке" => "на доставке",
+                "Отправлен" => "отправлен",
                 "Отменен" => "отменён",
                 _ => status
             };
-            await _telegramService.SendMessageAsync(telegramUserId.Value,
-                $"<b>Статус заказа {order.OrderNumber} изменён</b>\nНовый статус: {statusText}.");
+            if (status == "Ожидает оплату" && previousStatus != "Ожидает оплату")
+            {
+                await _telegramService.SendMessageAsync(telegramUserId.Value,
+                    $"<b>Заказ {order.OrderNumber} успешно оформлен</b>\nНеобходимо оплатить заказ. После оплаты мы соберём и отправим его.");
+            }
+            else
+            {
+                await _telegramService.SendMessageAsync(telegramUserId.Value,
+                    $"<b>Статус заказа {order.OrderNumber} изменён</b>\nНовый статус: {statusText}.");
+            }
 
             if (status == "В сборке")
             {
@@ -262,13 +275,14 @@ public class OrderService : IOrderService
         return new OrderStatisticsDto
         {
             TotalOrders = orders.Count,
-            PendingOrders = orders.Count(o => o.Status == "В сборке"),
+            FormingOrders = orders.Count(o => o.Status == "Формирование заказа"),
             AwaitingPaymentOrders = orders.Count(o => o.Status == "Ожидает оплату"),
-            InTransitOrders = orders.Count(o => o.Status == "В пути"),
-            DeliveredOrders = orders.Count(o => o.Status == "Доставлен"),
+            PendingOrders = orders.Count(o => o.Status == "В сборке"),
+            OnDeliveryOrders = orders.Count(o => o.Status == "На доставке"),
+            SentOrders = orders.Count(o => o.Status == "Отправлен"),
             CancelledOrders = orders.Count(o => o.Status == "Отменен"),
-            TotalRevenue = orders.Where(o => o.Status == "Доставлен").Sum(o => o.TotalAmount),
-            PendingRevenue = orders.Where(o => o.Status != "Отменен" && o.Status != "Доставлен").Sum(o => o.TotalAmount)
+            TotalRevenue = orders.Where(o => o.Status == "Отправлен").Sum(o => GetFinalAmount(o)),
+            PendingRevenue = orders.Where(o => o.Status != "Отменен" && o.Status != "Отправлен").Sum(o => GetFinalAmount(o))
         };
     }
 
@@ -345,11 +359,13 @@ public class OrderService : IOrderService
                     .OrderByDescending(o => o.CreatedAt)
                     .FirstOrDefaultAsync();
 
+                var nextUserProfileLink = nextUser.TelegramUserId.HasValue ? "tg://user?id=" + nextUser.TelegramUserId.Value : null;
                 if (existingOrder != null)
                 {
                     existingOrder.OrderItems.Add(newOrderItem);
                     existingOrder.TotalAmount += product.Price;
                     existingOrder.CustomerName = customerName;
+                    existingOrder.CustomerProfileLink = nextUserProfileLink ?? existingOrder.CustomerProfileLink;
                     if (!string.IsNullOrWhiteSpace(phone)) existingOrder.CustomerPhone = phone;
                     existingOrder.UpdatedAt = DateTime.UtcNow;
                 }
@@ -361,6 +377,7 @@ public class OrderService : IOrderService
                         OrderNumber = orderNumber,
                         UserId = nextUser.Id,
                         CustomerName = customerName,
+                        CustomerProfileLink = nextUserProfileLink,
                         CustomerPhone = phone,
                         CustomerEmail = nextUser.Email,
                         TotalAmount = product.Price,
@@ -392,6 +409,17 @@ public class OrderService : IOrderService
         return true;
     }
 
+    public async Task<bool> SetOrderItemAddedToParcelAsync(int orderId, int itemId, bool addedToParcel)
+    {
+        var item = await _context.OrderItems
+            .FirstOrDefaultAsync(oi => oi.OrderId == orderId && oi.Id == itemId);
+        if (item == null)
+            return false;
+        item.AddedToParcel = addedToParcel;
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
     public async Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName, string? customerPhone = null, long? commentChatId = null, int? commentMessageId = null)
     {
         var product = await _context.Products
@@ -399,7 +427,7 @@ public class OrderService : IOrderService
         if (product == null)
             return new ReserveFromTelegramResultDto { Success = false, Reason = "ProductNotFound" };
 
-        var activeStatuses = new[] { "Ожидает оплату", "В сборке", "В пути", "Доставлен" };
+        var activeStatuses = new[] { "Ожидает оплату", "В сборке", "На доставке", "Отправлен" };
         var alreadyReserved = await _context.OrderItems
             .AnyAsync(oi => oi.ProductId == product.Id && _context.Orders.Any(o => o.Id == oi.OrderId && activeStatuses.Contains(o.Status)));
         if (alreadyReserved)
@@ -460,6 +488,10 @@ public class OrderService : IOrderService
         if (string.IsNullOrEmpty(customerName))
             customerName = $"Telegram {telegramUserId}";
 
+        var customerProfileLink = !string.IsNullOrEmpty(username)
+            ? "https://t.me/" + username.TrimStart('@')
+            : "tg://user?id=" + telegramUserId;
+
         var orderItem = new OrderItem
         {
             ProductId = product.Id,
@@ -486,6 +518,7 @@ public class OrderService : IOrderService
             order.OrderItems.Add(orderItem);
             order.TotalAmount += product.Price;
             order.CustomerName = customerName;
+            order.CustomerProfileLink = customerProfileLink;
             if (!string.IsNullOrEmpty(phone))
                 order.CustomerPhone = phone;
             order.UpdatedAt = DateTime.UtcNow;
@@ -498,6 +531,7 @@ public class OrderService : IOrderService
                 OrderNumber = orderNumber,
                 UserId = user.Id,
                 CustomerName = customerName,
+                CustomerProfileLink = customerProfileLink,
                 CustomerPhone = phone,
                 CustomerEmail = user.Email,
                 TotalAmount = product.Price,
@@ -524,6 +558,72 @@ public class OrderService : IOrderService
         return new ReserveFromTelegramResultDto { Success = true, Order = MapToDto(order, user) };
     }
 
+    public async Task ApplyDiscountToOrdersAsync(IEnumerable<int> orderIds, string discountType, int? fixedPercent, int? condition1, int? condition3, int? condition5Plus)
+    {
+        var ids = orderIds.ToList();
+        var orders = await _context.Orders.Where(o => ids.Contains(o.Id)).ToListAsync();
+        foreach (var order in orders)
+        {
+            order.DiscountType = discountType;
+            order.FixedDiscountPercent = fixedPercent;
+            order.Condition1ItemPercent = condition1;
+            order.Condition3ItemsPercent = condition3;
+            order.Condition5PlusPercent = condition5Plus;
+            order.UpdatedAt = DateTime.UtcNow;
+        }
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task<bool> RemoveOrderDiscountAsync(int orderId)
+    {
+        var order = await _context.Orders.FindAsync(orderId);
+        if (order == null) return false;
+        order.DiscountType = "None";
+        order.FixedDiscountPercent = null;
+        order.Condition1ItemPercent = null;
+        order.Condition3ItemsPercent = null;
+        order.Condition5PlusPercent = null;
+        order.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<bool> ApplyOrderDiscountAsync(int orderId, int percent)
+    {
+        var order = await _context.Orders.FindAsync(orderId);
+        if (order == null) return false;
+        order.DiscountType = "Fixed";
+        order.FixedDiscountPercent = percent;
+        order.Condition1ItemPercent = null;
+        order.Condition3ItemsPercent = null;
+        order.Condition5PlusPercent = null;
+        order.UpdatedAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    private static int GetEffectiveDiscountPercent(Order order)
+    {
+        if (string.IsNullOrEmpty(order.DiscountType) || order.DiscountType == "None")
+            return 0;
+        if (order.DiscountType == "Fixed" && order.FixedDiscountPercent.HasValue)
+            return order.FixedDiscountPercent.Value;
+        if (order.DiscountType == "ByCondition")
+        {
+            var itemCount = order.OrderItems.Sum(oi => oi.Quantity);
+            if (itemCount >= 5 && order.Condition5PlusPercent.HasValue) return order.Condition5PlusPercent.Value;
+            if (itemCount >= 3 && order.Condition3ItemsPercent.HasValue) return order.Condition3ItemsPercent.Value;
+            if (order.Condition1ItemPercent.HasValue) return order.Condition1ItemPercent.Value;
+        }
+        return 0;
+    }
+
+    private static decimal GetFinalAmount(Order order)
+    {
+        var pct = GetEffectiveDiscountPercent(order);
+        return order.TotalAmount * (100 - pct) / 100m;
+    }
+
     private static OrderDto MapToDto(Order order, User? user = null)
     {
         return new OrderDto
@@ -537,7 +637,13 @@ public class OrderService : IOrderService
             DeliveryMethod = order.DeliveryMethod,
             Comment = order.Comment,
             TotalAmount = order.TotalAmount,
+            FinalAmount = GetFinalAmount(order),
             Status = order.Status,
+            DiscountType = order.DiscountType ?? "None",
+            FixedDiscountPercent = order.FixedDiscountPercent,
+            Condition1ItemPercent = order.Condition1ItemPercent,
+            Condition3ItemsPercent = order.Condition3ItemsPercent,
+            Condition5PlusPercent = order.Condition5PlusPercent,
             OrderItems = order.OrderItems.Select(oi => new OrderItemDto
             {
                 Id = oi.Id,
@@ -548,13 +654,15 @@ public class OrderService : IOrderService
                 Size = oi.Product?.Size,
                 Color = oi.Product?.Color,
                 Brand = oi.Product?.Brand,
-                ImageUrl = oi.Product?.Images?.FirstOrDefault()
+                ImageUrl = oi.Product?.Images?.FirstOrDefault(),
+                AddedToParcel = oi.AddedToParcel
             }).ToList(),
             CreatedAt = order.CreatedAt,
             UpdatedAt = order.UpdatedAt,
             CancelledAt = order.CancelledAt,
             CancellationReason = order.CancellationReason,
             UserId = order.UserId,
+            CustomerProfileLink = order.CustomerProfileLink ?? (user?.TelegramUserId != null ? "tg://user?id=" + user.TelegramUserId : null),
             TelegramUserId = user?.TelegramUserId,
             TelegramUsername = user != null ? (user.FullName ?? (user.Username != null && !user.Username.StartsWith("telegram_") ? user.Username : null)) ?? order.CustomerName : null
         };

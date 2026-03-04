@@ -371,14 +371,22 @@ public class TelegramController : ControllerBase
             var results = new List<ProductSendResult>();
             var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
+            // Exclude products that are in orders with status "Отправлен" (not available for channel)
+            var sentOrderProductIds = await _context.OrderItems
+                .Where(oi => _context.Orders.Any(o => o.Id == oi.OrderId && o.Status == "Отправлен"))
+                .Select(oi => oi.ProductId)
+                .Distinct()
+                .ToListAsync();
+            var productIdsToSend = request.ProductIds.Except(sentOrderProductIds).ToList();
+
             // Load products from database
             var products = await _context.Products
-                .Where(p => request.ProductIds.Contains(p.Id))
+                .Where(p => productIdsToSend.Contains(p.Id))
                 .ToListAsync();
 
             if (products.Count == 0)
             {
-                return BadRequest(new { message = "No products found with provided IDs" });
+                return BadRequest(new { message = "No products found with provided IDs or all are in sent orders" });
             }
 
             // Send all products to channel asynchronously (in parallel)

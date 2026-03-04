@@ -8,13 +8,22 @@ public class OrderDto
     public int Id { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
     public string CustomerName { get; set; } = string.Empty;
+    /// <summary>Link to customer profile or chat (tg://user?id=... or https://t.me/username).</summary>
+    public string? CustomerProfileLink { get; set; }
     public string CustomerPhone { get; set; } = string.Empty;
     public string? CustomerEmail { get; set; }
     public string? CustomerAddress { get; set; }
     public string? DeliveryMethod { get; set; }
     public string? Comment { get; set; }
     public decimal TotalAmount { get; set; }
+    /// <summary>Final amount after discount (computed).</summary>
+    public decimal FinalAmount { get; set; }
     public string Status { get; set; } = "Ожидает оплату";
+    public string DiscountType { get; set; } = "None";
+    public int? FixedDiscountPercent { get; set; }
+    public int? Condition1ItemPercent { get; set; }
+    public int? Condition3ItemsPercent { get; set; }
+    public int? Condition5PlusPercent { get; set; }
     public List<OrderItemDto> OrderItems { get; set; } = new();
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
@@ -40,6 +49,8 @@ public class OrderItemDto
     public string? Brand { get; set; }
     /// <summary>URL or path to first product image (for mini photo in admin).</summary>
     public string? ImageUrl { get; set; }
+    /// <summary>Whether the item has been marked as added to the parcel.</summary>
+    public bool AddedToParcel { get; set; }
 }
 
 /// <summary>

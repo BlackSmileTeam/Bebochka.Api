@@ -118,11 +118,17 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.OrderNumber).IsRequired().HasMaxLength(50);
             entity.Property(e => e.CustomerName).IsRequired().HasMaxLength(255);
+            entity.Property(e => e.CustomerProfileLink).HasMaxLength(500);
             entity.Property(e => e.CustomerPhone).IsRequired().HasMaxLength(50);
             entity.Property(e => e.CustomerEmail).HasMaxLength(255);
             entity.Property(e => e.DeliveryMethod).HasMaxLength(50);
             entity.Property(e => e.Status).IsRequired().HasMaxLength(50).HasDefaultValue("Ожидает оплату");
             entity.Property(e => e.TotalAmount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.DiscountType).HasMaxLength(20).HasDefaultValue("None");
+            entity.Property(e => e.FixedDiscountPercent);
+            entity.Property(e => e.Condition1ItemPercent);
+            entity.Property(e => e.Condition3ItemsPercent);
+            entity.Property(e => e.Condition5PlusPercent);
             entity.Property(e => e.CancellationReason).HasMaxLength(500);
             entity.HasIndex(e => e.OrderNumber).IsUnique();
             entity.HasIndex(e => e.Status);
@@ -136,6 +142,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.ProductPrice).HasColumnType("decimal(10,2)");
             entity.Property(e => e.TelegramCommentChatId);
             entity.Property(e => e.TelegramCommentMessageId);
+            entity.Property(e => e.AddedToParcel).HasDefaultValue(false);
             entity.HasOne(e => e.Order)
                 .WithMany(o => o.OrderItems)
                 .HasForeignKey(e => e.OrderId)

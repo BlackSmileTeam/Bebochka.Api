@@ -72,5 +72,25 @@ public interface IOrderService
     /// Removes an item from an order: deletes user's Telegram comment, restores stock, optionally assigns product to next user from reserve queue.
     /// </summary>
     Task<bool> DeleteOrderItemAsync(int orderId, int itemId);
+
+    /// <summary>
+    /// Sets whether an order item is marked as added to the parcel.
+    /// </summary>
+    Task<bool> SetOrderItemAddedToParcelAsync(int orderId, int itemId, bool addedToParcel);
+
+    /// <summary>
+    /// Applies discount to multiple orders (fixed percent or by condition).
+    /// </summary>
+    Task ApplyDiscountToOrdersAsync(IEnumerable<int> orderIds, string discountType, int? fixedPercent, int? condition1, int? condition3, int? condition5Plus);
+
+    /// <summary>
+    /// Removes discount from an order.
+    /// </summary>
+    Task<bool> RemoveOrderDiscountAsync(int orderId);
+
+    /// <summary>
+    /// Applies fixed discount to a single order.
+    /// </summary>
+    Task<bool> ApplyOrderDiscountAsync(int orderId, int percent);
 }
 

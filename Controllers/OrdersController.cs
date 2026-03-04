@@ -220,6 +220,69 @@ public class OrdersController : ControllerBase
         if (!ok) return NotFound();
         return NoContent();
     }
+
+    /// <summary>
+    /// Marks an order item as added to parcel or not.
+    /// </summary>
+    [HttpPatch("{orderId}/items/{itemId}/in-parcel")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> SetOrderItemInParcel(int orderId, int itemId, [FromBody] SetOrderItemInParcelDto dto)
+    {
+        var ok = await _orderService.SetOrderItemAddedToParcelAsync(orderId, itemId, dto.AddedToParcel);
+        if (!ok) return NotFound();
+        return Ok();
+    }
+
+    /// <summary>
+    /// Applies discount to selected orders (bulk).
+    /// </summary>
+    [HttpPost("apply-discount")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult> ApplyDiscount([FromBody] ApplyDiscountDto dto)
+    {
+        if (dto.OrderIds == null || dto.OrderIds.Count == 0)
+            return BadRequest(new { message = "OrderIds required" });
+        if (dto.DiscountType != "Fixed" && dto.DiscountType != "ByCondition")
+            return BadRequest(new { message = "DiscountType must be Fixed or ByCondition" });
+        if (dto.DiscountType == "Fixed" && (!dto.FixedDiscountPercent.HasValue || dto.FixedDiscountPercent.Value < 0 || dto.FixedDiscountPercent.Value > 100))
+            return BadRequest(new { message = "FixedDiscountPercent must be 0-100" });
+        await _orderService.ApplyDiscountToOrdersAsync(dto.OrderIds, dto.DiscountType, dto.FixedDiscountPercent, dto.Condition1ItemPercent, dto.Condition3ItemsPercent, dto.Condition5PlusPercent);
+        return Ok();
+    }
+
+    /// <summary>
+    /// Removes discount from an order.
+    /// </summary>
+    [HttpDelete("{orderId}/discount")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> RemoveOrderDiscount(int orderId)
+    {
+        var ok = await _orderService.RemoveOrderDiscountAsync(orderId);
+        if (!ok) return NotFound();
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Applies fixed discount (percent) to a single order.
+    /// </summary>
+    [HttpPut("{orderId}/discount")]
+    [Authorize]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> SetOrderDiscount(int orderId, [FromBody] SetOrderDiscountDto dto)
+    {
+        if (dto.Percent < 0 || dto.Percent > 100)
+            return BadRequest(new { message = "Percent must be 0-100" });
+        var ok = await _orderService.ApplyOrderDiscountAsync(orderId, dto.Percent);
+        if (!ok) return NotFound();
+        return Ok();
+    }
 }
 
 public class CancelOrderDto
@@ -230,5 +293,25 @@ public class CancelOrderDto
 public class UpdateOrderStatusDto
 {
     public string Status { get; set; } = string.Empty;
+}
+
+public class SetOrderItemInParcelDto
+{
+    public bool AddedToParcel { get; set; }
+}
+
+public class ApplyDiscountDto
+{
+    public List<int> OrderIds { get; set; } = new();
+    public string DiscountType { get; set; } = "Fixed";
+    public int? FixedDiscountPercent { get; set; }
+    public int? Condition1ItemPercent { get; set; }
+    public int? Condition3ItemsPercent { get; set; }
+    public int? Condition5PlusPercent { get; set; }
+}
+
+public class SetOrderDiscountDto
+{
+    public int Percent { get; set; }
 }
 

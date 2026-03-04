@@ -59,5 +59,10 @@ public class OrderItem
     /// Telegram message ID of the user's "беру" comment.
     /// </summary>
     public int? TelegramCommentMessageId { get; set; }
+
+    /// <summary>
+    /// Whether the item has been added to the parcel (for packing checklist).
+    /// </summary>
+    public bool AddedToParcel { get; set; }
 }
 

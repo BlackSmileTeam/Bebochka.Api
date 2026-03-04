@@ -24,6 +24,11 @@ public class Order
     /// Gets or sets the customer name
     /// </summary>
     public string CustomerName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the link to customer profile or chat (e.g. tg://user?id=... or https://t.me/username)
+    /// </summary>
+    public string? CustomerProfileLink { get; set; }
     
     /// <summary>
     /// Gets or sets the customer phone number
@@ -56,9 +61,20 @@ public class Order
     public decimal TotalAmount { get; set; }
     
     /// <summary>
-    /// Gets or sets the order status (В сборке, Ожидает оплату, В пути, Доставлен, Отменен)
+    /// Gets or sets the order status (Формирование заказа, Ожидает оплату, В сборке, На доставке, Отправлен, Отменен)
     /// </summary>
     public string Status { get; set; } = "Ожидает оплату";
+
+    /// <summary>Discount type: None, Fixed, ByCondition.</summary>
+    public string DiscountType { get; set; } = "None";
+    /// <summary>Fixed discount percent (when DiscountType = Fixed).</summary>
+    public int? FixedDiscountPercent { get; set; }
+    /// <summary>Discount percent for 1 item (when DiscountType = ByCondition).</summary>
+    public int? Condition1ItemPercent { get; set; }
+    /// <summary>Discount percent for 3 items (when DiscountType = ByCondition).</summary>
+    public int? Condition3ItemsPercent { get; set; }
+    /// <summary>Discount percent for 5+ items (when DiscountType = ByCondition).</summary>
+    public int? Condition5PlusPercent { get; set; }
     
     /// <summary>
     /// Gets or sets the list of order items
