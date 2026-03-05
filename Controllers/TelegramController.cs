@@ -20,6 +20,11 @@ public class SendProductsToChannelRequestDto
     /// Gets or sets the list of product IDs to send
     /// </summary>
     public List<int> ProductIds { get; set; } = new();
+
+    /// <summary>
+    /// Optional. Telegram custom_emoji_id to use for this send. If set, overrides the user's saved preference.
+    /// </summary>
+    public string? PreferredEmojiId { get; set; }
 }
 
 /// <summary>
@@ -372,14 +377,19 @@ public class TelegramController : ControllerBase
             var results = new List<ProductSendResult>();
             var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
-            // Resolve current user's preferred channel emoji (Telegram custom_emoji_id)
-            string? channelEmojiId = null;
-            var userIdClaim = User.FindFirst("UserId")?.Value
-                              ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out var userId))
+            // Resolve channel emoji: from request first, then from user's saved preference
+            string? channelEmojiId = !string.IsNullOrWhiteSpace(request.PreferredEmojiId)
+                ? request.PreferredEmojiId.Trim()
+                : null;
+            if (string.IsNullOrEmpty(channelEmojiId))
             {
-                var user = await _context.Users.FindAsync(userId);
-                channelEmojiId = user?.ChannelCustomEmojiId;
+                var userIdClaim = User.FindFirst("UserId")?.Value
+                                  ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out var userId))
+                {
+                    var user = await _context.Users.FindAsync(userId);
+                    channelEmojiId = user?.ChannelCustomEmojiId;
+                }
             }
 
             // Exclude products that are in orders with status "Отправлен" (not available for channel)
