@@ -62,7 +62,7 @@ public interface ITelegramNotificationService
     /// </summary>
     /// <param name="message">Message text to send</param>
     /// <returns>Result with Success and MessageId/ChatId for linking to product</returns>
-    Task<ChannelSendResult> SendMessageToChannelAsync(string message);
+    Task<ChannelSendResult> SendMessageToChannelAsync(string message, string? customEmojiId = null);
     
     /// <summary>
     /// Sends a message with photos to a Telegram channel.
@@ -72,7 +72,7 @@ public interface ITelegramNotificationService
     /// <param name="imageUrls">List of image URLs (used when telegramFileIds is not used)</param>
     /// <param name="telegramFileIds">Optional list of Telegram file_id; when set, skips download and upload</param>
     /// <returns>Result with Success and MessageId/ChatId for linking to product</returns>
-    Task<ChannelSendResult> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null);
+    Task<ChannelSendResult> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null, string? customEmojiId = null);
     
     /// <summary>
     /// Uploads a photo to the configured storage chat and returns its file_id for later reuse.

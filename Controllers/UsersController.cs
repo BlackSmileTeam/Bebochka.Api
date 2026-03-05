@@ -213,6 +213,45 @@ public class UsersController : ControllerBase
     }
 
     /// <summary>
+    /// Gets current authenticated user's preferred channel emoji (Telegram custom_emoji_id)
+    /// </summary>
+    [HttpGet("me/channel-emoji")]
+    public async Task<ActionResult<object>> GetMyChannelEmoji()
+    {
+        var userIdClaim = User.FindFirst("UserId")?.Value
+                          ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            return Unauthorized();
+
+        var user = await _context.Users.FindAsync(userId);
+        if (user == null)
+            return Unauthorized();
+
+        return Ok(new { emojiId = user.ChannelCustomEmojiId });
+    }
+
+    /// <summary>
+    /// Updates current authenticated user's preferred channel emoji (Telegram custom_emoji_id)
+    /// </summary>
+    [HttpPost("me/channel-emoji")]
+    public async Task<ActionResult> SetMyChannelEmoji([FromBody] UpdateChannelEmojiDto dto)
+    {
+        var userIdClaim = User.FindFirst("UserId")?.Value
+                          ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
+            return Unauthorized();
+
+        var user = await _context.Users.FindAsync(userId);
+        if (user == null)
+            return Unauthorized();
+
+        user.ChannelCustomEmojiId = string.IsNullOrWhiteSpace(dto.EmojiId) ? null : dto.EmojiId.Trim();
+        await _context.SaveChangesAsync();
+
+        return Ok(new { emojiId = user.ChannelCustomEmojiId });
+    }
+
+    /// <summary>
     /// Deletes a user
     /// </summary>
     /// <param name="id">User ID</param>

@@ -71,6 +71,11 @@ public class UserDto
     /// Gets or sets the creation date
     /// </summary>
     public DateTime? CreatedAt { get; set; }
+
+    /// <summary>
+    /// Gets or sets preferred custom emoji id for channel posts (Telegram custom_emoji_id)
+    /// </summary>
+    public string? ChannelCustomEmojiId { get; set; }
 }
 
 /// <summary>
@@ -93,5 +98,16 @@ public class LinkTelegramUserIdDto
     /// Gets or sets the Telegram User ID
     /// </summary>
     public long TelegramUserId { get; set; }
+}
+
+/// <summary>
+/// Request DTO for updating current user's channel emoji preference
+/// </summary>
+public class UpdateChannelEmojiDto
+{
+    /// <summary>
+    /// Gets or sets the Telegram custom_emoji_id to use in channel posts (null/empty to reset)
+    /// </summary>
+    public string? EmojiId { get; set; }
 }
 

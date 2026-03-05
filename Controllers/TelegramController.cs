@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using Bebochka.Api.Services;
 using Bebochka.Api.Models.DTOs;
 using Bebochka.Api.Data;
@@ -371,6 +372,16 @@ public class TelegramController : ControllerBase
             var results = new List<ProductSendResult>();
             var baseUrl = $"{Request.Scheme}://{Request.Host}";
 
+            // Resolve current user's preferred channel emoji (Telegram custom_emoji_id)
+            string? channelEmojiId = null;
+            var userIdClaim = User.FindFirst("UserId")?.Value
+                              ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out var userId))
+            {
+                var user = await _context.Users.FindAsync(userId);
+                channelEmojiId = user?.ChannelCustomEmojiId;
+            }
+
             // Exclude products that are in orders with status "Отправлен" (not available for channel)
             var sentOrderProductIds = await _context.OrderItems
                 .Where(oi => _context.Orders.Any(o => o.Id == oi.OrderId && o.Status == "Отправлен"))
@@ -442,11 +453,11 @@ public class TelegramController : ControllerBase
                     if (imageUrls.Any())
                     {
                         var fileIds = product.TelegramFileIds;
-                        sendResult = await _telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls, fileIds);
+                        sendResult = await _telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls, fileIds, channelEmojiId);
                     }
                     else
                     {
-                        sendResult = await _telegramService.SendMessageToChannelAsync(caption);
+                        sendResult = await _telegramService.SendMessageToChannelAsync(caption, channelEmojiId);
                     }
 
                     // Update PublishedAt immediately after successful send for real-time progress tracking

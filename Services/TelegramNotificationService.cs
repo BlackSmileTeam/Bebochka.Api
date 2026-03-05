@@ -25,6 +25,21 @@ public class TelegramNotificationService : ITelegramNotificationService
     private readonly string _botApiUrl;
     private readonly string? _channelId;
     private readonly string? _storageChatId;
+    /// <summary>Map config key (Product, Brand, ...) -> custom_emoji_id. Used for captions in channel.</summary>
+    private readonly IReadOnlyDictionary<string, string> _customEmojiIds;
+
+    /// <summary>Unicode emoji used in product captions -> config key for CustomEmojiIds.</summary>
+    private static readonly IReadOnlyList<(string Emoji, string Key)> CaptionEmojiKeys = new List<(string, string)>
+    {
+        ("🛍️", "Product"),
+        ("🏷️", "Brand"),
+        ("📏", "Size"),
+        ("🎨", "Color"),
+        ("👤", "Gender"),
+        ("✨", "Condition"),
+        ("📝", "Description"),
+        ("💰", "Price")
+    };
 
     public TelegramNotificationService(
         HttpClient httpClient,
@@ -49,6 +64,18 @@ public class TelegramNotificationService : ITelegramNotificationService
         _botApiUrl = $"https://api.telegram.org/bot{_botToken}";
         _channelId = configuration["TelegramBot:ChannelId"];
         _storageChatId = configuration["TelegramBot:StorageChatId"];
+
+        var emojiSection = configuration.GetSection("TelegramBot:CustomEmojiIds");
+        var emojiDict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (emojiSection.Exists())
+        {
+            foreach (var child in emojiSection.GetChildren())
+                if (!string.IsNullOrWhiteSpace(child.Value))
+                    emojiDict[child.Key] = child.Value!.Trim();
+        }
+        _customEmojiIds = emojiDict;
+        if (_customEmojiIds.Count > 0)
+            _logger.LogInformation("Custom emoji configured for channel captions: {Keys}", string.Join(", ", _customEmojiIds.Keys));
         
         // Log token presence (but not the actual token for security)
         _logger.LogInformation("TelegramNotificationService initialized. Bot token configured: {TokenPresent}, Channel ID configured: {ChannelIdPresent}, StorageChatId (for cache): {StoragePresent}", 
@@ -59,6 +86,42 @@ public class TelegramNotificationService : ITelegramNotificationService
         {
             _logger.LogWarning("TelegramBot:ChannelId is not configured. Channel messages will fail. Check environment variable TelegramBot__ChannelId or configuration key TelegramBot:ChannelId");
         }
+    }
+
+    /// <summary>
+    /// If CustomEmojiIds are configured, replaces Unicode emoji in caption with &lt;tg-emoji emoji-id="..."&gt; so Telegram shows custom emoji from the configured pack.
+    /// If a per-user customEmojiId is provided, it is used for all emojis instead of per-field config.
+    /// </summary>
+    private string ApplyCustomEmojiToCaption(string caption, string? customEmojiId = null)
+    {
+        if (string.IsNullOrEmpty(caption))
+            return caption;
+
+        var result = caption;
+
+        if (!string.IsNullOrWhiteSpace(customEmojiId))
+        {
+            var trimmedId = customEmojiId.Trim();
+            foreach (var (emoji, _) in CaptionEmojiKeys)
+            {
+                var tag = $"<tg-emoji emoji-id=\"{trimmedId}\">{emoji}</tg-emoji>";
+                result = result.Replace(emoji, tag, StringComparison.Ordinal);
+            }
+            return result;
+        }
+
+        if (_customEmojiIds.Count == 0)
+            return result;
+
+        foreach (var (emoji, key) in CaptionEmojiKeys)
+        {
+            if (!_customEmojiIds.TryGetValue(key, out var configEmojiId) || string.IsNullOrWhiteSpace(configEmojiId))
+                continue;
+            var tag = $"<tg-emoji emoji-id=\"{configEmojiId.Trim()}\">{emoji}</tg-emoji>";
+            result = result.Replace(emoji, tag, StringComparison.Ordinal);
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -398,7 +461,7 @@ public class TelegramNotificationService : ITelegramNotificationService
     /// <summary>
     /// Sends a message to a Telegram channel
     /// </summary>
-    public async Task<ChannelSendResult> SendMessageToChannelAsync(string message)
+    public async Task<ChannelSendResult> SendMessageToChannelAsync(string message, string? customEmojiId = null)
     {
         try
         {
@@ -419,6 +482,8 @@ public class TelegramNotificationService : ITelegramNotificationService
                 _logger.LogWarning("Attempted to send empty message to channel");
                 return new ChannelSendResult { Success = false };
             }
+
+            message = ApplyCustomEmojiToCaption(message, customEmojiId);
 
             // Log message details for debugging
             var messagePreview = message.Length > 200 ? message.Substring(0, 200) + "..." : message;
@@ -506,8 +571,10 @@ public class TelegramNotificationService : ITelegramNotificationService
     /// Sends a message with photos to a Telegram channel.
     /// When telegramFileIds is provided (same count as imageUrls), sends by file_id without re-upload.
     /// </summary>
-    public async Task<ChannelSendResult> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null)
+    public async Task<ChannelSendResult> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null, string? customEmojiId = null)
     {
+        if (!string.IsNullOrWhiteSpace(message))
+            message = ApplyCustomEmojiToCaption(message, customEmojiId);
         try
         {
             if (string.IsNullOrWhiteSpace(_botToken))

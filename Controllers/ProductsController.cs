@@ -219,6 +219,16 @@ public class ProductsController : ControllerBase
                 }
             }
 
+            // Resolve current user's preferred channel emoji (Telegram custom_emoji_id)
+            string? channelEmojiId = null;
+            var userIdClaim = User.FindFirst("UserId")?.Value
+                              ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out var currentUserId))
+            {
+                var currentUser = await _context.Users.FindAsync(currentUserId);
+                channelEmojiId = currentUser?.ChannelCustomEmojiId;
+            }
+
             _ = Task.Run(async () =>
             {
                 using var scope = scopeFactory.CreateScope();
@@ -230,9 +240,9 @@ public class ProductsController : ControllerBase
                     if (publishToChannel && caption != null)
                     {
                         if (imageUrls != null && imageUrls.Count > 0)
-                            await telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls);
+                            await telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls, null, channelEmojiId);
                         else
-                            await telegramService.SendMessageToChannelAsync(caption);
+                            await telegramService.SendMessageToChannelAsync(caption, channelEmojiId);
                     }
                 }
                 catch (Exception ex)

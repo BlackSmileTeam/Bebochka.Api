@@ -54,5 +54,10 @@ public class User
     /// Gets or sets the Telegram User ID for linking with Telegram bot
     /// </summary>
     public long? TelegramUserId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the preferred custom emoji id for channel posts (Telegram custom_emoji_id)
+    /// </summary>
+    public string? ChannelCustomEmojiId { get; set; }
 }
 
