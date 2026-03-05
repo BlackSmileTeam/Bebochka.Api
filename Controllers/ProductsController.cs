@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Bebochka.Api.Data;
 using Bebochka.Api.Models.DTOs;
 using Bebochka.Api.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -17,6 +18,7 @@ public class ProductsController : ControllerBase
     private readonly IProductService _productService;
     private readonly IWebHostEnvironment _environment;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly AppDbContext _context;
 
     /// <summary>
     /// Initializes a new instance of the ProductsController class
@@ -24,11 +26,13 @@ public class ProductsController : ControllerBase
     public ProductsController(
         IProductService productService,
         IWebHostEnvironment environment,
-        IServiceScopeFactory scopeFactory)
+        IServiceScopeFactory scopeFactory,
+        AppDbContext context)
     {
         _productService = productService;
         _environment = environment;
         _scopeFactory = scopeFactory;
+        _context = context;
     }
 
     /// <summary>
@@ -443,8 +447,8 @@ public class ProductsController : ControllerBase
                 PublishedAt = moscowNow
             };
             
-            // Update product with null image paths to preserve existing images (we're only updating PublishedAt)
-            var product = await _productService.UpdateProductAsync(id, updateDto, null);
+            // Update product with empty image list to preserve existing images (we're only updating PublishedAt)
+            var product = await _productService.UpdateProductAsync(id, updateDto, new List<string>());
             if (product == null)
                 return NotFound();
 

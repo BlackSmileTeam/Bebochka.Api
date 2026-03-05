@@ -122,9 +122,8 @@ public class UsersController : ControllerBase
 
             return Ok(user.IsAdmin);
         }
-        catch (Exception ex)
+        catch
         {
-            // Логируем ошибку и возвращаем false
             return Ok(false);
         }
     }

@@ -111,7 +111,7 @@ public class AnnouncementsController : ControllerBase
         {
             Message = dto.Message,
             ScheduledAt = scheduledAtMoscow, // Store directly (will be treated as Moscow time during comparison)
-            ProductIds = dto.ProductIds,
+            ProductIds = dto.ProductIds ?? new List<int>(),
             CreatedAt = DateTime.UtcNow
         };
 
