@@ -28,18 +28,8 @@ public class TelegramNotificationService : ITelegramNotificationService
     /// <summary>Map config key (Product, Brand, ...) -> custom_emoji_id. Used for captions in channel.</summary>
     private readonly IReadOnlyDictionary<string, string> _customEmojiIds;
 
-    /// <summary>Unicode emoji used in product captions -> config key for CustomEmojiIds.</summary>
-    private static readonly IReadOnlyList<(string Emoji, string Key)> CaptionEmojiKeys = new List<(string, string)>
-    {
-        ("🛍️", "Product"),
-        ("🏷️", "Brand"),
-        ("📏", "Size"),
-        ("🎨", "Color"),
-        ("👤", "Gender"),
-        ("✨", "Condition"),
-        ("📝", "Description"),
-        ("💰", "Price")
-    };
+    /// <summary>Single placeholder emoji used in channel captions; custom emoji pack IDs are bound to this.</summary>
+    private const string ChannelCaptionPlaceholderEmoji = "🤩";
 
     public TelegramNotificationService(
         HttpClient httpClient,
@@ -89,32 +79,25 @@ public class TelegramNotificationService : ITelegramNotificationService
     }
 
     /// <summary>
-    /// If CustomEmojiIds are configured, replaces Unicode emoji in caption with &lt;tg-emoji emoji-id="..."&gt; so Telegram shows custom emoji from the configured pack.
+    /// If CustomEmojiIds are configured, replaces placeholder emoji in caption with &lt;tg-emoji emoji-id="..."&gt;.
     /// </summary>
     private string ApplyCustomEmojiToCaption(string caption)
     {
-        if (string.IsNullOrEmpty(caption))
+        if (string.IsNullOrEmpty(caption) || _customEmojiIds.Count == 0)
             return caption;
 
-        var result = caption;
+        if (!_customEmojiIds.TryGetValue("Default", out var configEmojiId) || string.IsNullOrWhiteSpace(configEmojiId))
+            configEmojiId = _customEmojiIds.Values.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(configEmojiId))
+            return caption;
 
-        if (_customEmojiIds.Count == 0)
-            return result;
-
-        foreach (var (emoji, key) in CaptionEmojiKeys)
-        {
-            if (!_customEmojiIds.TryGetValue(key, out var configEmojiId) || string.IsNullOrWhiteSpace(configEmojiId))
-                continue;
-            var tag = $"<tg-emoji emoji-id=\"{configEmojiId.Trim()}\">{emoji}</tg-emoji>";
-            result = result.Replace(emoji, tag, StringComparison.Ordinal);
-        }
-
-        return result;
+        var tag = $"<tg-emoji emoji-id=\"{configEmojiId.Trim()}\">{ChannelCaptionPlaceholderEmoji}</tg-emoji>";
+        return caption.Replace(ChannelCaptionPlaceholderEmoji, tag, StringComparison.Ordinal);
     }
 
     /// <summary>
     /// Builds MessageEntity objects for custom emoji (Telegram uses UTF-16 offsets/lengths).
-    /// We keep the original Unicode emoji in text and attach entities with the given custom_emoji_id.
+    /// Finds all placeholder emoji (🤩) in text and attaches the given custom_emoji_id.
     /// </summary>
     private static List<Dictionary<string, object>> BuildCustomEmojiEntities(string text, string customEmojiId)
     {
@@ -123,27 +106,24 @@ public class TelegramNotificationService : ITelegramNotificationService
             return entities;
 
         var id = customEmojiId.Trim();
-        foreach (var (emoji, _) in CaptionEmojiKeys)
+        var placeholder = ChannelCaptionPlaceholderEmoji;
+        var start = 0;
+        while (true)
         {
-            var start = 0;
-            while (true)
+            var idx = text.IndexOf(placeholder, start, StringComparison.Ordinal);
+            if (idx < 0) break;
+
+            entities.Add(new Dictionary<string, object>
             {
-                var idx = text.IndexOf(emoji, start, StringComparison.Ordinal);
-                if (idx < 0) break;
+                ["type"] = "custom_emoji",
+                ["offset"] = idx,
+                ["length"] = placeholder.Length,
+                ["custom_emoji_id"] = id
+            });
 
-                entities.Add(new Dictionary<string, object>
-                {
-                    ["type"] = "custom_emoji",
-                    ["offset"] = idx,
-                    ["length"] = emoji.Length,
-                    ["custom_emoji_id"] = id
-                });
-
-                start = idx + emoji.Length;
-            }
+            start = idx + placeholder.Length;
         }
 
-        entities.Sort((a, b) => ((int)a["offset"]).CompareTo((int)b["offset"]));
         return entities;
     }
 

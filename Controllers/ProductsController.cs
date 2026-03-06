@@ -202,14 +202,14 @@ public class ProductsController : ControllerBase
             List<string>? imageUrls = null;
             if (publishToChannel)
             {
-                caption = $"🛍️ {product.Name}\n";
-                if (!string.IsNullOrEmpty(product.Brand)) caption += $"🏷️ Бренд: {product.Brand}\n";
-                if (!string.IsNullOrEmpty(product.Size)) caption += $"📏 Размер: {product.Size}\n";
-                if (!string.IsNullOrEmpty(product.Color)) caption += $"🎨 Цвет: {product.Color}\n";
-                if (!string.IsNullOrEmpty(product.Gender)) caption += $"👤 Пол: {product.Gender}\n";
-                if (!string.IsNullOrEmpty(product.Condition)) caption += $"✨ Состояние: {product.Condition}\n";
-                if (!string.IsNullOrEmpty(product.Description)) caption += $"\n📝 {product.Description}\n";
-                caption += $"\n💰 Цена: {product.Price:N0} ₽\n";
+                caption = $"{product.Name}\n";
+                if (!string.IsNullOrEmpty(product.Brand)) caption += $"🤩 Бренд: {product.Brand}\n";
+                if (!string.IsNullOrEmpty(product.Size)) caption += $"🤩 Размер: {product.Size}\n";
+                if (!string.IsNullOrEmpty(product.Color)) caption += $"🤩 Цвет: {product.Color}\n";
+                if (!string.IsNullOrEmpty(product.Gender)) caption += $"🤩 Пол: {product.Gender}\n";
+                if (!string.IsNullOrEmpty(product.Condition)) caption += $"🤩 Состояние: {product.Condition}\n";
+                if (!string.IsNullOrEmpty(product.Description)) caption += $"\n🤩 {product.Description}\n";
+                caption += $"\n🤩 Цена: {product.Price:N0} ₽\n";
                 if (product.Images != null && product.Images.Any())
                 {
                     imageUrls = new List<string>();

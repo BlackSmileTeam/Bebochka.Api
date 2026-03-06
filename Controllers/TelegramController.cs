@@ -418,20 +418,20 @@ public class TelegramController : ControllerBase
                 try
                 {
                     // Format message on backend
-                    var caption = $"🛍️ {product.Name}\n";
+                    var caption = $"{product.Name}\n";
                     if (!string.IsNullOrEmpty(product.Brand))
-                        caption += $"🏷️ Бренд: {product.Brand}\n";
+                        caption += $"🤩 Бренд: {product.Brand}\n";
                     if (!string.IsNullOrEmpty(product.Size))
-                        caption += $"📏 Размер: {product.Size}\n";
+                        caption += $"🤩 Размер: {product.Size}\n";
                     if (!string.IsNullOrEmpty(product.Color))
-                        caption += $"🎨 Цвет: {product.Color}\n";
+                        caption += $"🤩 Цвет: {product.Color}\n";
                     if (!string.IsNullOrEmpty(product.Gender))
-                        caption += $"👤 Пол: {product.Gender}\n";
+                        caption += $"🤩 Пол: {product.Gender}\n";
                     if (!string.IsNullOrEmpty(product.Condition))
-                        caption += $"✨ Состояние: {product.Condition}\n";
+                        caption += $"🤩 Состояние: {product.Condition}\n";
                     if (!string.IsNullOrEmpty(product.Description))
-                        caption += $"\n📝 {product.Description}\n";
-                    caption += $"\n💰 Цена: {product.Price:N0} ₽\n";
+                        caption += $"\n🤩 {product.Description}\n";
+                    caption += $"\n🤩 Цена: {product.Price:N0} ₽\n";
 
                     // Build image URLs from database paths
                     var imageUrls = new List<string>();
