@@ -458,11 +458,22 @@ public class TelegramController : ControllerBase
                         }
                     }
 
+                    // If no file_id cache, run pre-cache first so send uses file_id (fast path)
+                    var fileIds = product.TelegramFileIds;
+                    if (imageUrls.Any() && (fileIds == null || fileIds.Count != imageUrls.Count || fileIds.Any(string.IsNullOrWhiteSpace)))
+                    {
+                        using var preCacheScope = _serviceScopeFactory.CreateScope();
+                        var preCacheService = preCacheScope.ServiceProvider.GetRequiredService<ITelegramNotificationService>();
+                        await preCacheService.PreCacheProductImagesAsync(product.Id, baseUrl);
+                        var preCacheContext = preCacheScope.ServiceProvider.GetRequiredService<AppDbContext>();
+                        var refreshed = await preCacheContext.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == product.Id);
+                        fileIds = refreshed?.TelegramFileIds;
+                    }
+
                     // Send to channel (use pre-cached file_id if available — быстрее, без повторной загрузки)
                     ChannelSendResult sendResult;
                     if (imageUrls.Any())
                     {
-                        var fileIds = product.TelegramFileIds;
                         sendResult = await _telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls, fileIds, channelEmojiId);
                     }
                     else

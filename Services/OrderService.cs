@@ -353,9 +353,10 @@ public class OrderService : IOrderService
                     TelegramCommentMessageId = nextQueue.CommentMessageId != 0 ? nextQueue.CommentMessageId : null
                 };
 
+                var statusesAllowedToAdd = new[] { "Формирование заказа", "Ожидает оплату" };
                 var existingOrder = await _context.Orders
                     .Include(o => o.OrderItems)
-                    .Where(o => o.UserId == nextUser.Id && o.Status == "Ожидает оплату")
+                    .Where(o => o.UserId == nextUser.Id && statusesAllowedToAdd.Contains(o.Status))
                     .OrderByDescending(o => o.CreatedAt)
                     .FirstOrDefaultAsync();
 
@@ -502,10 +503,11 @@ public class OrderService : IOrderService
             TelegramCommentMessageId = commentMessageId
         };
 
-        // Если у пользователя уже есть заказ со статусом «Ожидает оплату» — добавляем товар в него
+        // Добавляем в существующий заказ только если статус «Формирование заказа» или «Ожидает оплату»; иначе создаём новый
+        var statusesAllowedToAdd = new[] { "Формирование заказа", "Ожидает оплату" };
         var existingOrder = await _context.Orders
             .Include(o => o.OrderItems)
-            .Where(o => o.UserId == user.Id && o.Status == "Ожидает оплату")
+            .Where(o => o.UserId == user.Id && statusesAllowedToAdd.Contains(o.Status))
             .OrderByDescending(o => o.CreatedAt)
             .FirstOrDefaultAsync();
 
