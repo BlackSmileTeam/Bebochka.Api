@@ -90,25 +90,13 @@ public class TelegramNotificationService : ITelegramNotificationService
 
     /// <summary>
     /// If CustomEmojiIds are configured, replaces Unicode emoji in caption with &lt;tg-emoji emoji-id="..."&gt; so Telegram shows custom emoji from the configured pack.
-    /// If a per-user customEmojiId is provided, it is used for all emojis instead of per-field config.
     /// </summary>
-    private string ApplyCustomEmojiToCaption(string caption, string? customEmojiId = null)
+    private string ApplyCustomEmojiToCaption(string caption)
     {
         if (string.IsNullOrEmpty(caption))
             return caption;
 
         var result = caption;
-
-        if (!string.IsNullOrWhiteSpace(customEmojiId))
-        {
-            var trimmedId = customEmojiId.Trim();
-            foreach (var (emoji, _) in CaptionEmojiKeys)
-            {
-                var tag = $"<tg-emoji emoji-id=\"{trimmedId}\">{emoji}</tg-emoji>";
-                result = result.Replace(emoji, tag, StringComparison.Ordinal);
-            }
-            return result;
-        }
 
         if (_customEmojiIds.Count == 0)
             return result;
@@ -122,6 +110,41 @@ public class TelegramNotificationService : ITelegramNotificationService
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Builds MessageEntity objects for custom emoji (Telegram uses UTF-16 offsets/lengths).
+    /// We keep the original Unicode emoji in text and attach entities with the given custom_emoji_id.
+    /// </summary>
+    private static List<Dictionary<string, object>> BuildCustomEmojiEntities(string text, string customEmojiId)
+    {
+        var entities = new List<Dictionary<string, object>>();
+        if (string.IsNullOrEmpty(text) || string.IsNullOrWhiteSpace(customEmojiId))
+            return entities;
+
+        var id = customEmojiId.Trim();
+        foreach (var (emoji, _) in CaptionEmojiKeys)
+        {
+            var start = 0;
+            while (true)
+            {
+                var idx = text.IndexOf(emoji, start, StringComparison.Ordinal);
+                if (idx < 0) break;
+
+                entities.Add(new Dictionary<string, object>
+                {
+                    ["type"] = "custom_emoji",
+                    ["offset"] = idx,
+                    ["length"] = emoji.Length,
+                    ["custom_emoji_id"] = id
+                });
+
+                start = idx + emoji.Length;
+            }
+        }
+
+        entities.Sort((a, b) => ((int)a["offset"]).CompareTo((int)b["offset"]));
+        return entities;
     }
 
     /// <summary>
@@ -483,8 +506,6 @@ public class TelegramNotificationService : ITelegramNotificationService
                 return new ChannelSendResult { Success = false };
             }
 
-            message = ApplyCustomEmojiToCaption(message, customEmojiId);
-
             // Log message details for debugging
             var messagePreview = message.Length > 200 ? message.Substring(0, 200) + "..." : message;
             _logger.LogInformation("Sending message to channel {ChannelId}. Message preview: {MessagePreview}", 
@@ -494,12 +515,27 @@ public class TelegramNotificationService : ITelegramNotificationService
             _logger.LogDebug("Sending message to Telegram channel: {Url} (channelId: {ChannelId})", 
                 url.Replace(_botToken, "***"), _channelId);
             
-            var payload = new
+            object payload;
+            if (!string.IsNullOrWhiteSpace(customEmojiId))
             {
-                chat_id = _channelId,
-                text = message,
-                parse_mode = "HTML"
-            };
+                payload = new Dictionary<string, object?>
+                {
+                    ["chat_id"] = _channelId,
+                    ["text"] = message,
+                    ["entities"] = BuildCustomEmojiEntities(message, customEmojiId)
+                };
+            }
+            else
+            {
+                var htmlMessage = ApplyCustomEmojiToCaption(message);
+                payload = new Dictionary<string, object?>
+                {
+                    ["chat_id"] = _channelId,
+                    ["text"] = htmlMessage,
+                    ["parse_mode"] = "HTML"
+                };
+                message = htmlMessage;
+            }
 
             var response = await ExecuteWithRetryAsync(
                 async (ct) => 
@@ -573,8 +609,6 @@ public class TelegramNotificationService : ITelegramNotificationService
     /// </summary>
     public async Task<ChannelSendResult> SendMessageToChannelWithPhotosAsync(string message, List<string> imageUrls, List<string>? telegramFileIds = null, string? customEmojiId = null)
     {
-        if (!string.IsNullOrWhiteSpace(message))
-            message = ApplyCustomEmojiToCaption(message, customEmojiId);
         try
         {
             if (string.IsNullOrWhiteSpace(_botToken))
@@ -591,15 +625,15 @@ public class TelegramNotificationService : ITelegramNotificationService
 
             if (imageUrls == null || imageUrls.Count == 0)
             {
-                // Если нет изображений, отправляем только текст
-                return await SendMessageToChannelAsync(message);
+                // No images - text only
+                return await SendMessageToChannelAsync(message, customEmojiId);
             }
 
             // Если есть предзагруженные file_id — отправляем из кэша Telegram (без скачивания и загрузки)
             if (telegramFileIds != null && telegramFileIds.Count == imageUrls.Count && telegramFileIds.All(f => !string.IsNullOrWhiteSpace(f)))
             {
                 _logger.LogInformation("Sending {Count} photos to channel by file_id (from cache)", telegramFileIds.Count);
-                return await SendMessageToChannelWithPhotoFileIdsAsync(message, telegramFileIds);
+                return await SendMessageToChannelWithPhotoFileIdsAsync(message, telegramFileIds, customEmojiId);
             }
 
             // Log message details for debugging
@@ -672,8 +706,22 @@ public class TelegramNotificationService : ITelegramNotificationService
                     content.Add(new ByteArrayContent(images[0].Bytes), "photo", $"photo{images[0].Extension}");
                     if (!string.IsNullOrWhiteSpace(message))
                     {
-                        content.Add(new StringContent(message), "caption");
-                        content.Add(new StringContent("HTML"), "parse_mode");
+                        var captionToSend = message;
+                        if (string.IsNullOrWhiteSpace(customEmojiId))
+                            captionToSend = ApplyCustomEmojiToCaption(captionToSend);
+
+                        content.Add(new StringContent(captionToSend), "caption");
+                        if (!string.IsNullOrWhiteSpace(customEmojiId))
+                        {
+                            var entities = BuildCustomEmojiEntities(captionToSend, customEmojiId);
+                            if (entities.Count > 0)
+                                content.Add(new StringContent(System.Text.Json.JsonSerializer.Serialize(entities)), "caption_entities");
+                        }
+                        else
+                        {
+                            content.Add(new StringContent("HTML"), "parse_mode");
+                        }
+                        message = captionToSend;
                     }
 
                     var captionPreview = message.Length > 100 ? message.Substring(0, 100) + "..." : message;
@@ -733,8 +781,21 @@ public class TelegramNotificationService : ITelegramNotificationService
                 // Добавляем caption только к последнему фото
                 if (i == images.Count - 1 && !string.IsNullOrWhiteSpace(message))
                 {
-                    mediaObj["caption"] = message;
-                    mediaObj["parse_mode"] = "HTML";
+                    var captionToSend = message;
+                    if (string.IsNullOrWhiteSpace(customEmojiId))
+                        captionToSend = ApplyCustomEmojiToCaption(captionToSend);
+
+                    mediaObj["caption"] = captionToSend;
+                    if (!string.IsNullOrWhiteSpace(customEmojiId))
+                    {
+                        var entities = BuildCustomEmojiEntities(captionToSend, customEmojiId);
+                        if (entities.Count > 0)
+                            mediaObj["caption_entities"] = entities;
+                    }
+                    else
+                    {
+                        mediaObj["parse_mode"] = "HTML";
+                    }
                 }
                 
                 mediaArray.Add(mediaObj);
@@ -849,7 +910,7 @@ public class TelegramNotificationService : ITelegramNotificationService
     /// <summary>
     /// Sends a message with photos to the channel using pre-cached Telegram file_id (no upload).
     /// </summary>
-    private async Task<ChannelSendResult> SendMessageToChannelWithPhotoFileIdsAsync(string message, List<string> fileIds)
+    private async Task<ChannelSendResult> SendMessageToChannelWithPhotoFileIdsAsync(string message, List<string> fileIds, string? customEmojiId = null)
     {
         if (fileIds.Count == 1)
         {
@@ -859,8 +920,22 @@ public class TelegramNotificationService : ITelegramNotificationService
             content.Add(new StringContent(fileIds[0]), "photo");
             if (!string.IsNullOrWhiteSpace(message))
             {
-                content.Add(new StringContent(message), "caption");
-                content.Add(new StringContent("HTML"), "parse_mode");
+                var captionToSend = message;
+                if (string.IsNullOrWhiteSpace(customEmojiId))
+                    captionToSend = ApplyCustomEmojiToCaption(captionToSend);
+
+                content.Add(new StringContent(captionToSend), "caption");
+                if (!string.IsNullOrWhiteSpace(customEmojiId))
+                {
+                    var entities = BuildCustomEmojiEntities(captionToSend, customEmojiId);
+                    if (entities.Count > 0)
+                        content.Add(new StringContent(System.Text.Json.JsonSerializer.Serialize(entities)), "caption_entities");
+                }
+                else
+                {
+                    content.Add(new StringContent("HTML"), "parse_mode");
+                }
+                message = captionToSend;
             }
             var response = await ExecuteWithRetryAsync(
                 async (ct) => await _httpClient.PostAsync(url, content, ct),
@@ -887,8 +962,21 @@ public class TelegramNotificationService : ITelegramNotificationService
             var mediaObj = new Dictionary<string, object> { { "type", "photo" }, { "media", fileIds[i] } };
             if (i == fileIds.Count - 1 && !string.IsNullOrWhiteSpace(message))
             {
-                mediaObj["caption"] = message;
-                mediaObj["parse_mode"] = "HTML";
+                var captionToSend = message;
+                if (string.IsNullOrWhiteSpace(customEmojiId))
+                    captionToSend = ApplyCustomEmojiToCaption(captionToSend);
+
+                mediaObj["caption"] = captionToSend;
+                if (!string.IsNullOrWhiteSpace(customEmojiId))
+                {
+                    var entities = BuildCustomEmojiEntities(captionToSend, customEmojiId);
+                    if (entities.Count > 0)
+                        mediaObj["caption_entities"] = entities;
+                }
+                else
+                {
+                    mediaObj["parse_mode"] = "HTML";
+                }
             }
             mediaArray.Add(mediaObj);
         }
