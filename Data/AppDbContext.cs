@@ -62,6 +62,16 @@ public class AppDbContext : DbContext
     public DbSet<ReserveQueue> ReserveQueue { get; set; }
 
     /// <summary>
+    /// OTP-коды для входа по телефону
+    /// </summary>
+    public DbSet<PhoneLoginOtp> PhoneLoginOtps { get; set; }
+
+    /// <summary>
+    /// Аудит согласий на обработку персональных данных
+    /// </summary>
+    public DbSet<PersonalDataConsentLog> PersonalDataConsentLogs { get; set; }
+
+    /// <summary>
     /// Configures the entity models and their relationships
     /// </summary>
     /// <param name="modelBuilder">Model builder instance</param>
@@ -83,6 +93,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.TelegramFileIdsJson).HasColumnName("TelegramFileIds");
             entity.Ignore(e => e.TelegramFileIds);
             entity.Property(e => e.PublishedAt);
+            entity.Property(e => e.CartAvailableAt);
             entity.Property(e => e.TelegramMessageId);
             entity.Property(e => e.TelegramChatId).HasMaxLength(50);
             entity.HasIndex(e => e.PublishedAt);
@@ -97,9 +108,13 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Email).HasMaxLength(100);
             entity.Property(e => e.FullName).HasMaxLength(100);
             entity.Property(e => e.TelegramUserId);
+            entity.Property(e => e.Phone).HasMaxLength(20);
+            entity.Property(e => e.GoogleSub).HasMaxLength(64);
             entity.Property(e => e.IsAdmin).HasDefaultValue(false);
             entity.HasIndex(e => e.Username).IsUnique();
             entity.HasIndex(e => e.TelegramUserId).IsUnique().HasFilter("[TelegramUserId] IS NOT NULL");
+            entity.HasIndex(e => e.Phone).IsUnique().HasFilter("[Phone] IS NOT NULL");
+            entity.HasIndex(e => e.GoogleSub).IsUnique().HasFilter("[GoogleSub] IS NOT NULL");
         });
 
         modelBuilder.Entity<CartItem>(entity =>
@@ -107,9 +122,14 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.SessionId).IsRequired().HasMaxLength(255);
             entity.HasIndex(e => new { e.SessionId, e.ProductId });
+            entity.HasIndex(e => new { e.UserId, e.ProductId });
             entity.HasOne(e => e.Product)
                 .WithMany()
                 .HasForeignKey(e => e.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -163,10 +183,23 @@ public class AppDbContext : DbContext
             entity.Property(e => e.CustomerPhone).HasMaxLength(50);
             entity.HasIndex(e => e.ProductId);
             entity.HasIndex(e => new { e.ChannelId, e.PostMessageId });
+            entity.HasIndex(e => new { e.ProductId, e.WebUserId }).IsUnique().HasFilter("[WebUserId] IS NOT NULL");
             entity.HasOne(e => e.Product)
                 .WithMany()
                 .HasForeignKey(e => e.ProductId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.WebUser)
+                .WithMany()
+                .HasForeignKey(e => e.WebUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PhoneLoginOtp>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.PhoneE164).IsRequired().HasMaxLength(20);
+            entity.Property(e => e.Code).IsRequired().HasMaxLength(10);
+            entity.HasIndex(e => e.PhoneE164);
         });
 
         modelBuilder.Entity<Announcement>(entity =>
@@ -199,6 +232,22 @@ public class AppDbContext : DbContext
             entity.Property(e => e.ErrorDate).IsRequired();
             entity.HasIndex(e => e.ErrorDate);
             entity.HasIndex(e => e.ErrorType);
+        });
+
+        modelBuilder.Entity<PersonalDataConsentLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.ConsentKind).IsRequired().HasMaxLength(80);
+            entity.Property(e => e.IpAddress).HasMaxLength(45);
+            entity.Property(e => e.UserAgent).HasColumnType("TEXT");
+            entity.Property(e => e.DeviceType).HasMaxLength(32);
+            entity.Property(e => e.ExtraJson).HasColumnType("TEXT");
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.AcceptedAtUtc);
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

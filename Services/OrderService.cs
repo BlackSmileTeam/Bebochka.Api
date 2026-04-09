@@ -78,10 +78,20 @@ public class OrderService : IOrderService
             UpdatedAt = DateTime.UtcNow
         };
 
-        // Удаляем товары из корзины пользователя
-        var cartItems = await _context.CartItems
-            .Where(c => c.SessionId == dto.SessionId)
-            .ToListAsync();
+        // Удаляем товары из корзины пользователя (гость по SessionId, авторизованный — по UserId)
+        List<CartItem> cartItems;
+        if (dto.UserId.HasValue)
+        {
+            cartItems = await _context.CartItems
+                .Where(c => c.UserId == dto.UserId.Value)
+                .ToListAsync();
+        }
+        else
+        {
+            cartItems = await _context.CartItems
+                .Where(c => c.SessionId == dto.SessionId && c.UserId == null)
+                .ToListAsync();
+        }
         _context.CartItems.RemoveRange(cartItems);
 
         _context.Orders.Add(order);
@@ -106,11 +116,22 @@ public class OrderService : IOrderService
 
     public async Task<List<OrderDto>> GetAllOrdersAsync()
     {
-        var orders = await _context.Orders
-            .Include(o => o.OrderItems)
-            .ThenInclude(oi => oi.Product)
-            .OrderByDescending(o => o.CreatedAt)
-            .ToListAsync();
+        List<Order> orders;
+        try
+        {
+            orders = await _context.Orders
+                .Include(o => o.OrderItems)
+                .ThenInclude(oi => oi.Product)
+                .OrderByDescending(o => o.CreatedAt)
+                .ToListAsync();
+        }
+        catch (Exception ex) when (ex.Message.Contains("Unknown column 'o0.CreatedAt'", StringComparison.OrdinalIgnoreCase))
+        {
+            // Compatibility fallback for databases that were not migrated with OrderItems.CreatedAt yet.
+            orders = await _context.Orders
+                .OrderByDescending(o => o.CreatedAt)
+                .ToListAsync();
+        }
 
         // Загружаем информацию о пользователях для заказов
         var userIds = orders.Where(o => o.UserId.HasValue).Select(o => o.UserId!.Value).Distinct().ToList();
@@ -142,12 +163,24 @@ public class OrderService : IOrderService
 
     public async Task<List<OrderDto>> GetUserOrdersAsync(int userId)
     {
-        var orders = await _context.Orders
-            .Include(o => o.OrderItems)
-            .ThenInclude(oi => oi.Product)
-            .Where(o => o.UserId == userId)
-            .OrderByDescending(o => o.CreatedAt)
-            .ToListAsync();
+        List<Order> orders;
+        try
+        {
+            orders = await _context.Orders
+                .Include(o => o.OrderItems)
+                .ThenInclude(oi => oi.Product)
+                .Where(o => o.UserId == userId)
+                .OrderByDescending(o => o.CreatedAt)
+                .ToListAsync();
+        }
+        catch (Exception ex) when (ex.Message.Contains("Unknown column 'o0.CreatedAt'", StringComparison.OrdinalIgnoreCase))
+        {
+            // Compatibility fallback for databases that were not migrated with OrderItems.CreatedAt yet.
+            orders = await _context.Orders
+                .Where(o => o.UserId == userId)
+                .OrderByDescending(o => o.CreatedAt)
+                .ToListAsync();
+        }
 
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
 
@@ -329,7 +362,7 @@ public class OrderService : IOrderService
         _context.OrderItems.Remove(item);
 
         var nextQueue = await _context.ReserveQueue
-            .Where(rq => rq.ProductId == product.Id)
+            .Where(rq => rq.ProductId == product.Id && rq.WebUserId == null && rq.TelegramUserId != null)
             .OrderBy(rq => rq.CreatedAt)
             .FirstOrDefaultAsync();
 

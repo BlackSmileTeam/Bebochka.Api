@@ -90,15 +90,20 @@ public class ProductPublicationService : BackgroundService
                     _logger.LogInformation("Product {ProductId} '{ProductName}' published at {PublishedAt} Moscow time", 
                         product.Id, product.Name, product.PublishedAt);
                     
-                    // Mark as notified in memory
                     _notifiedProducts.TryAdd(product.Id, utcNow);
                 }
 
-                // Send notification to all Telegram users (only once per batch of new products)
-                var notificationMessage = "Уважаемые дамы, каталог был обновлен. Успевайте забронировать товар!";
-                var sentCount = await telegramService.SendBroadcastMessageAsync(notificationMessage);
-
-                _logger.LogInformation("Publication notification sent to {SentCount} users at {MoscowNow} Moscow time", sentCount, moscowNow);
+                var notify = scope.ServiceProvider.GetRequiredService<IConfiguration>().GetValue("Telegram:NotifyCatalogUpdate", false);
+                if (notify)
+                {
+                    var notificationMessage = "Уважаемые дамы, каталог был обновлен. Успевайте забронировать товар!";
+                    var sentCount = await telegramService.SendBroadcastMessageAsync(notificationMessage);
+                    _logger.LogInformation("Publication notification sent to {SentCount} users at {MoscowNow} Moscow time", sentCount, moscowNow);
+                }
+                else
+                {
+                    _logger.LogInformation("Telegram catalog notifications disabled (Telegram:NotifyCatalogUpdate=false)");
+                }
             }
             else
             {

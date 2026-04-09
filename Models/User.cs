@@ -24,6 +24,16 @@ public class User
     /// Gets or sets the user's email address
     /// </summary>
     public string? Email { get; set; }
+
+    /// <summary>
+    /// Phone in E.164 format (e.g. +79001234567) for SMS login
+    /// </summary>
+    public string? Phone { get; set; }
+
+    /// <summary>
+    /// Google OAuth subject (unique per Google account)
+    /// </summary>
+    public string? GoogleSub { get; set; }
     
     /// <summary>
     /// Gets or sets the user's full name

@@ -80,6 +80,16 @@ public class ProductDto
     /// If null, product is published immediately
     /// </summary>
     public DateTime? PublishedAt { get; set; }
+
+    /// <summary>
+    /// Московское время: кнопка «В корзину» не раньше этого момента. Null — без отдельной задержки.
+    /// </summary>
+    public DateTime? CartAvailableAt { get; set; }
+
+    /// <summary>
+    /// Можно ли добавлять в корзину сейчас (по московскому времени).
+    /// </summary>
+    public bool CartUnlocked { get; set; } = true;
 }
 
 /// <summary>
@@ -142,6 +152,11 @@ public class CreateProductDto
     /// If null, product is published immediately
     /// </summary>
     public DateTime? PublishedAt { get; set; }
+
+    /// <summary>
+    /// Когда разрешить «В корзину» (московское время); null — сразу после появления в каталоге
+    /// </summary>
+    public DateTime? CartAvailableAt { get; set; }
 }
 
 /// <summary>
@@ -209,4 +224,9 @@ public class UpdateProductDto
     /// If null, product is published immediately
     /// </summary>
     public DateTime? PublishedAt { get; set; }
+
+    /// <summary>
+    /// Когда разрешить «В корзину» (московское время); null — без отдельной задержки
+    /// </summary>
+    public DateTime? CartAvailableAt { get; set; }
 }

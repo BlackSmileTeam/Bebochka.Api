@@ -7,18 +7,11 @@ namespace Bebochka.Api.Services;
 /// </summary>
 public interface IAuthService
 {
-    /// <summary>
-    /// Authenticates a user and returns a JWT token
-    /// </summary>
-    /// <param name="loginDto">Login credentials</param>
-    /// <returns>Authentication response with token</returns>
     Task<AuthResponseDto?> LoginAsync(LoginDto loginDto);
-    
-    /// <summary>
-    /// Validates a JWT token and returns user information
-    /// </summary>
-    /// <param name="token">JWT token</param>
-    /// <returns>User information if token is valid</returns>
     Task<UserDto?> ValidateTokenAsync(string token);
+    Task<AuthResponseDto?> RegisterAsync(RegisterDto dto);
+    Task<AuthResponseDto?> LoginWithGoogleAsync(GoogleLoginDto dto);
+    Task<bool> SendPhoneLoginCodeAsync(PhoneSendCodeDto dto);
+    Task<AuthResponseDto?> VerifyPhoneLoginAsync(PhoneVerifyDto dto);
+    Task MergeGuestCartAsync(int userId, string sessionId);
 }
-

@@ -11,7 +11,12 @@ public class ReserveQueue
     public Product? Product { get; set; }
     public string ChannelId { get; set; } = string.Empty;
     public int PostMessageId { get; set; }
-    public long TelegramUserId { get; set; }
+    /// <summary>Telegram user; null for website queue entries</summary>
+    public long? TelegramUserId { get; set; }
+
+    /// <summary>Site user waiting in queue (ChannelId = web)</summary>
+    public int? WebUserId { get; set; }
+    public User? WebUser { get; set; }
     public string? Username { get; set; }
     public string? FirstName { get; set; }
     public string? LastName { get; set; }

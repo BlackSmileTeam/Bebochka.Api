@@ -19,6 +19,8 @@ public class ProductsController : ControllerBase
     private readonly IWebHostEnvironment _environment;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly AppDbContext _context;
+    private readonly IConfiguration _configuration;
+    private readonly IAuthService _authService;
 
     /// <summary>
     /// Initializes a new instance of the ProductsController class
@@ -27,12 +29,26 @@ public class ProductsController : ControllerBase
         IProductService productService,
         IWebHostEnvironment environment,
         IServiceScopeFactory scopeFactory,
-        AppDbContext context)
+        AppDbContext context,
+        IConfiguration configuration,
+        IAuthService authService)
     {
         _productService = productService;
         _environment = environment;
         _scopeFactory = scopeFactory;
         _context = context;
+        _configuration = configuration;
+        _authService = authService;
+    }
+
+    private async Task<int?> TryGetUserIdFromBearerAsync()
+    {
+        var auth = Request.Headers.Authorization.FirstOrDefault();
+        if (string.IsNullOrEmpty(auth) || !auth.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+            return null;
+        var token = auth["Bearer ".Length..].Trim();
+        var user = await _authService.ValidateTokenAsync(token);
+        return user?.Id;
     }
 
     /// <summary>
@@ -44,7 +60,8 @@ public class ProductsController : ControllerBase
     [ProducesResponseType(typeof(List<ProductDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<ProductDto>>> GetAllProducts([FromQuery] string? sessionId = null)
     {
-        var products = await _productService.GetAllProductsAsync(sessionId);
+        var uid = await TryGetUserIdFromBearerAsync();
+        var products = await _productService.GetAllProductsAsync(sessionId, uid);
         return Ok(products);
     }
 
@@ -61,7 +78,8 @@ public class ProductsController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ProductDto>> GetProduct(int id, [FromQuery] string? sessionId = null)
     {
-        var product = await _productService.GetProductByIdAsync(id, sessionId);
+        var uid = await TryGetUserIdFromBearerAsync();
+        var product = await _productService.GetProductByIdAsync(id, sessionId, uid);
         if (product == null)
             return NotFound();
 
@@ -92,7 +110,7 @@ public class ProductsController : ControllerBase
     ///     Images: [file1.jpg, file2.jpg]
     /// </remarks>
     [HttpPost]
-    [Authorize]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ProductDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -197,7 +215,7 @@ public class ProductsController : ControllerBase
             var scopeFactory = _scopeFactory;
             var productId = product.Id;
             var hasImages = product.Images != null && product.Images.Count > 0;
-            var publishToChannel = dto.PublishedAt.HasValue;
+            var publishToChannel = _configuration.GetValue("Telegram:PostNewProductsToChannel", false) && dto.PublishedAt.HasValue;
             string? caption = null;
             List<string>? imageUrls = null;
             if (publishToChannel)
@@ -276,7 +294,7 @@ public class ProductsController : ControllerBase
     /// <response code="404">Product not found</response>
     /// <response code="401">Unauthorized</response>
     [HttpPut("{id}")]
-    [Authorize]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ProductDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -392,7 +410,7 @@ public class ProductsController : ControllerBase
     /// <response code="404">Product not found</response>
     /// <response code="401">Unauthorized</response>
     [HttpDelete("{id}")]
-    [Authorize]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -412,7 +430,7 @@ public class ProductsController : ControllerBase
     /// <response code="200">Returns the list of all products</response>
     /// <response code="401">Unauthorized</response>
     [HttpGet("admin/all")]
-    [Authorize]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(List<ProductDto>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<List<ProductDto>>> GetAllProductsForAdmin()
@@ -430,7 +448,7 @@ public class ProductsController : ControllerBase
     /// <response code="404">Product not found</response>
     /// <response code="401">Unauthorized</response>
     [HttpPatch("{id}/publish")]
-    [Authorize]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(ProductDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

@@ -3,16 +3,16 @@
 
 USE bebochka;
 
--- Создание таблицы Announcements
+-- Создание таблицы Announcements (имена колонок совпадают с маппингом EF / Pomelo)
 CREATE TABLE IF NOT EXISTS Announcements (
     Id INT AUTO_INCREMENT PRIMARY KEY,
     Message TEXT NOT NULL,
     ScheduledAt DATETIME NOT NULL,
-    ProductIds JSON NOT NULL DEFAULT '[]',
-    CollageImages JSON NOT NULL DEFAULT '[]',
-    IsSent BOOLEAN NOT NULL DEFAULT FALSE,
+    ProductIds TEXT NOT NULL DEFAULT ('[]'),
+    CollageImages TEXT NOT NULL DEFAULT ('[]'),
+    IsSent TINYINT(1) NOT NULL DEFAULT 0,
     SentAt DATETIME NULL,
-    CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CreatedAt DATETIME NOT NULL DEFAULT (UTC_TIMESTAMP()),
     SentCount INT NOT NULL DEFAULT 0,
     INDEX idx_scheduled_at (ScheduledAt),
     INDEX idx_is_sent (IsSent)

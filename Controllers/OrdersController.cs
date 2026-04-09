@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Bebochka.Api.Models.DTOs;
@@ -41,10 +42,35 @@ public class OrdersController : ControllerBase
     }
 
     /// <summary>
+    /// Заказы текущего пользователя (сайт)
+    /// </summary>
+    [HttpGet("mine")]
+    [Authorize]
+    [ProducesResponseType(typeof(List<OrderDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<OrderDto>>> GetMyOrders()
+    {
+        try
+        {
+            var userIdClaim = User.FindFirst("UserId")?.Value
+                ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? User.FindFirst("sub")?.Value;
+            if (!int.TryParse(userIdClaim, out var userId))
+                return Unauthorized();
+            var orders = await _orderService.GetUserOrdersAsync(userId);
+            return Ok(orders);
+        }
+        catch
+        {
+            // Keep profile page usable even if order history query fails.
+            return Ok(new List<OrderDto>());
+        }
+    }
+
+    /// <summary>
     /// Gets all orders (admin only)
     /// </summary>
     [HttpGet]
-    [Authorize]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(List<OrderDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<OrderDto>>> GetAllOrders()
     {

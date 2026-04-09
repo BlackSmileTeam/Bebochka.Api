@@ -28,7 +28,7 @@ public class ProductService : IProductService
     /// </summary>
     /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
     /// <returns>List of all products</returns>
-    public async Task<List<ProductDto>> GetAllProductsAsync(string? sessionId = null)
+    public async Task<List<ProductDto>> GetAllProductsAsync(string? sessionId = null, int? currentUserId = null)
     {
         var moscowNow = DateTimeHelper.GetMoscowTime();
         var products = await _context.Products
@@ -38,11 +38,10 @@ public class ProductService : IProductService
 
         // Вычисляем зарезервированное количество для каждого товара
         var productIds = products.Select(p => p.Id).ToList();
-        var expirationTime = DateTime.UtcNow.AddMinutes(-20);
-        var reservedItems = await _context.CartItems
-            .Where(c => productIds.Contains(c.ProductId) && 
-                       (sessionId == null || c.SessionId != sessionId) &&
-                       c.UpdatedAt > expirationTime) // Только активные резервы (не старше 20 минут)
+        var cartQuery = _context.CartItems
+            .Where(c => productIds.Contains(c.ProductId));
+        cartQuery = ApplyOtherUsersCartFilter(cartQuery, sessionId, currentUserId);
+        var reservedItems = await cartQuery
             .GroupBy(c => c.ProductId)
             .Select(g => new { ProductId = g.Key, Reserved = g.Sum(c => c.Quantity) })
             .ToListAsync();
@@ -66,7 +65,7 @@ public class ProductService : IProductService
     /// <param name="id">Product identifier</param>
     /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
     /// <returns>Product information or null if not found</returns>
-    public async Task<ProductDto?> GetProductByIdAsync(int id, string? sessionId = null)
+    public async Task<ProductDto?> GetProductByIdAsync(int id, string? sessionId = null, int? currentUserId = null)
     {
         var moscowNow = DateTimeHelper.GetMoscowTime();
         var product = await _context.Products
@@ -77,12 +76,9 @@ public class ProductService : IProductService
         var dto = MapToDto(product);
 
         // Вычисляем зарезервированное количество для этого товара
-        var expirationTime = DateTime.UtcNow.AddMinutes(-20);
-        var reservedQuantity = await _context.CartItems
-            .Where(c => c.ProductId == id &&
-                       (sessionId == null || c.SessionId != sessionId) &&
-                       c.UpdatedAt > expirationTime) // Только активные резервы (не старше 20 минут)
-            .SumAsync(c => (int?)c.Quantity) ?? 0;
+        var rq = _context.CartItems.Where(c => c.ProductId == id);
+        rq = ApplyOtherUsersCartFilter(rq, sessionId, currentUserId);
+        var reservedQuantity = await rq.SumAsync(c => (int?)c.Quantity) ?? 0;
 
         // Вычисляем доступное количество (общее - зарезервированное)
         dto.AvailableQuantity = Math.Max(0, product.QuantityInStock - reservedQuantity);
@@ -113,6 +109,7 @@ public class ProductService : IProductService
             Gender = dto.Gender,
             Condition = dto.Condition,
             PublishedAt = dto.PublishedAt, // Store as Moscow time directly
+            CartAvailableAt = dto.CartAvailableAt,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -177,6 +174,17 @@ public class ProductService : IProductService
         {
             product.PublishedAt = null;
         }
+        if (dto.CartAvailableAt.HasValue)
+        {
+            product.CartAvailableAt = new DateTime(
+                dto.CartAvailableAt.Value.Year,
+                dto.CartAvailableAt.Value.Month,
+                dto.CartAvailableAt.Value.Day,
+                dto.CartAvailableAt.Value.Hour,
+                dto.CartAvailableAt.Value.Minute,
+                dto.CartAvailableAt.Value.Second,
+                DateTimeKind.Unspecified);
+        }
         product.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -205,8 +213,19 @@ public class ProductService : IProductService
     /// </summary>
     /// <param name="product">Product entity</param>
     /// <returns>Product data transfer object</returns>
+    private static IQueryable<CartItem> ApplyOtherUsersCartFilter(IQueryable<CartItem> query, string? sessionId, int? currentUserId)
+    {
+        if (currentUserId.HasValue)
+            return query.Where(c => c.UserId == null || c.UserId != currentUserId.Value);
+        if (string.IsNullOrEmpty(sessionId))
+            return query;
+        return query.Where(c => !(c.UserId == null && c.SessionId == sessionId));
+    }
+
     private static ProductDto MapToDto(Product product)
     {
+        var moscowNow = DateTimeHelper.GetMoscowTime();
+        var cartUnlocked = !product.CartAvailableAt.HasValue || product.CartAvailableAt.Value <= moscowNow;
         return new ProductDto
         {
             Id = product.Id,
@@ -221,6 +240,8 @@ public class ProductService : IProductService
             Gender = product.Gender,
             Condition = product.Condition,
             PublishedAt = product.PublishedAt,
+            CartAvailableAt = product.CartAvailableAt,
+            CartUnlocked = cartUnlocked,
             CreatedAt = product.CreatedAt,
             UpdatedAt = product.UpdatedAt
         };

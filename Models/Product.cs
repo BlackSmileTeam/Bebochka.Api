@@ -110,6 +110,11 @@ public class Product
     public DateTime? PublishedAt { get; set; }
 
     /// <summary>
+    /// Moscow time: "В корзину" is enabled at or after this moment. If null, same as catalog visibility rules.
+    /// </summary>
+    public DateTime? CartAvailableAt { get; set; }
+
+    /// <summary>
     /// Telegram channel message ID of the post (for linking comments/reservations).
     /// </summary>
     public int? TelegramMessageId { get; set; }

@@ -12,15 +12,16 @@ public interface IProductService
     /// </summary>
     /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
     /// <returns>List of all products</returns>
-    Task<List<ProductDto>> GetAllProductsAsync(string? sessionId = null);
+    Task<List<ProductDto>> GetAllProductsAsync(string? sessionId = null, int? currentUserId = null);
 
     /// <summary>
     /// Gets a product by its unique identifier
     /// </summary>
     /// <param name="id">Product identifier</param>
     /// <param name="sessionId">Optional session ID to exclude from reserved quantity calculation</param>
+    /// <param name="currentUserId">Authorized user (cart by UserId)</param>
     /// <returns>Product information or null if not found</returns>
-    Task<ProductDto?> GetProductByIdAsync(int id, string? sessionId = null);
+    Task<ProductDto?> GetProductByIdAsync(int id, string? sessionId = null, int? currentUserId = null);
 
     /// <summary>
     /// Creates a new product

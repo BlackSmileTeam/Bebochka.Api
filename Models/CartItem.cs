@@ -14,6 +14,16 @@ public class CartItem
     /// Gets or sets the session ID of the user (from localStorage or cookie)
     /// </summary>
     public string SessionId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Registered user id when cart is tied to account; null for guests
+    /// </summary>
+    public int? UserId { get; set; }
+
+    /// <summary>
+    /// Navigation to user
+    /// </summary>
+    public User? User { get; set; }
     
     /// <summary>
     /// Gets or sets the product ID

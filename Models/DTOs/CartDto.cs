@@ -33,6 +33,14 @@ public class UpdateCartItemDto
 }
 
 /// <summary>
+/// Встать в очередь на товар (сайт), когда он занят в чужой корзине
+/// </summary>
+public class JoinCartQueueDto
+{
+    public int ProductId { get; set; }
+}
+
+/// <summary>
 /// Data transfer object for cart item
 /// </summary>
 public class CartItemDto

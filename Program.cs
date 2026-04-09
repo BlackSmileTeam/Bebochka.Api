@@ -4,7 +4,6 @@ using Microsoft.IdentityModel.Tokens;
 using System.Text;
 using Bebochka.Api.Data;
 using Bebochka.Api.Services;
-using Bebochka.Api.Models;
 using Pomelo.EntityFrameworkCore.MySql.Infrastructure;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Http.Features;
@@ -167,7 +166,13 @@ var connectionString = builder.Configuration.GetConnectionString("DefaultConnect
 // Используем MySQL 8.0.33 как базовую версию (можно изменить под вашу версию)
 var serverVersion = new MySqlServerVersion(new Version(8, 0, 33));
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseMySql(connectionString, serverVersion));
+    options.UseMySql(connectionString, serverVersion, mysqlOptions =>
+    {
+        mysqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(30),
+            errorNumbersToAdd: Array.Empty<int>());
+    }));
 
 // Add JWT Authentication
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "YourSuperSecretKeyForJWTTokenGenerationThatShouldBeAtLeast32CharactersLong!";
@@ -190,9 +195,9 @@ builder.Services.AddAuthentication(options =>
         ValidateAudience = true,
         ValidAudience = jwtAudience,
         ValidateLifetime = true,
-        ClockSkew = TimeSpan.Zero
+        ClockSkew = TimeSpan.Zero,
+        RoleClaimType = System.Security.Claims.ClaimTypes.Role
     };
-    
 });
 
 builder.Services.AddAuthorization();
@@ -202,6 +207,7 @@ builder.Services.AddAuthorization();
         // Add services
         builder.Services.AddScoped<IProductService, ProductService>();
         builder.Services.AddScoped<IAuthService, AuthService>();
+        builder.Services.AddScoped<WebReserveQueueService>();
         builder.Services.AddScoped<IOrderService, OrderService>();
         builder.Services.AddScoped<IEmailService, EmailService>();
         builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
@@ -214,7 +220,6 @@ builder.Services.AddAuthorization();
         });
         
         // Add background services
-        builder.Services.AddHostedService<CartCleanupService>();
         builder.Services.AddHostedService<ProductPublicationService>();
         builder.Services.AddHostedService<AnnouncementService>();
 
@@ -271,28 +276,11 @@ app.UseStaticFiles(new StaticFileOptions
 
 app.MapControllers();
 
-// Ensure database is created and create default admin user
+// Схема и учётные записи задаются через SQL-скрипты (Database/*.sql), без сидов в коде.
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.EnsureCreated();
-    
-    // Create default admin user if not exists
-    if (!dbContext.Users.Any(u => u.Username == "admin"))
-    {
-        var adminUser = new User
-        {
-            Username = "admin",
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword("Admin123!"),
-            Email = "admin@bebochka.com",
-            FullName = "Администратор",
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow
-        };
-        dbContext.Users.Add(adminUser);
-        dbContext.SaveChanges();
-        Console.WriteLine("Default admin user created: admin / Admin123!");
-    }
 }
 
 // Configure listening URLs

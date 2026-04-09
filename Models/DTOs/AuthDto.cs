@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Bebochka.Api.Models.DTOs;
 
 /// <summary>
@@ -40,6 +42,67 @@ public class AuthResponseDto
     /// Gets or sets the user's full name
     /// </summary>
     public string? FullName { get; set; }
+
+    public int UserId { get; set; }
+    public bool IsAdmin { get; set; }
+    public string? Email { get; set; }
+}
+
+/// <summary>
+/// Регистрация покупателя по телефону (логин в системе генерируется автоматически).
+/// </summary>
+public class RegisterDto
+{
+    /// <summary>Телефон в произвольном виде; нормализуется в E.164.</summary>
+    public string Phone { get; set; } = string.Empty;
+
+    public string Password { get; set; } = string.Empty;
+    public string? Email { get; set; }
+    public string? FullName { get; set; }
+
+    /// <summary>Обязательное согласие с пользовательским соглашением и обработкой персональных данных.</summary>
+    public bool AcceptPersonalDataProcessing { get; set; }
+}
+
+/// <summary>
+/// Вход через Google (credential JWT с фронта)
+/// </summary>
+public class GoogleLoginDto
+{
+    [JsonPropertyName("idToken")]
+    public string IdToken { get; set; } = string.Empty;
+
+    /// <summary>Обязательно при первичной регистрации через Google.</summary>
+    [JsonPropertyName("acceptPersonalDataProcessing")]
+    public bool AcceptPersonalDataProcessing { get; set; }
+}
+
+/// <summary>
+/// Запрос кода на телефон
+/// </summary>
+public class PhoneSendCodeDto
+{
+    public string Phone { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Проверка кода и вход
+/// </summary>
+public class PhoneVerifyDto
+{
+    public string Phone { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+
+    /// <summary>Обязательно при первичной регистрации по телефону.</summary>
+    public bool AcceptPersonalDataProcessing { get; set; }
+}
+
+/// <summary>
+/// Слияние гостевой корзины после входа
+/// </summary>
+public class MergeCartDto
+{
+    public string SessionId { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -61,6 +124,11 @@ public class UserDto
     /// Gets or sets the email
     /// </summary>
     public string? Email { get; set; }
+
+    /// <summary>
+    /// Телефон в E.164
+    /// </summary>
+    public string? Phone { get; set; }
     
     /// <summary>
     /// Gets or sets the full name
@@ -76,6 +144,11 @@ public class UserDto
     /// Gets or sets preferred custom emoji id for channel posts (Telegram custom_emoji_id)
     /// </summary>
     public string? ChannelCustomEmojiId { get; set; }
+
+    /// <summary>
+    /// Администратор (доступ в админку)
+    /// </summary>
+    public bool IsAdmin { get; set; }
 }
 
 /// <summary>
