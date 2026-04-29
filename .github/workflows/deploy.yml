@@ -7,10 +7,9 @@ on:
 
 env:
   DOCKERFILE_PATH: Dockerfile
-  SSH_PORT: 22
   CONTAINER_PORT: 44315
   HOST_PORT: 55501
-  DEPLOY_DIR: /root/bebochka-backend
+  DEPLOY_DIR: /opt/bebochka-backend
   IMAGE_NAME: bebochka-backend
 
 jobs:
@@ -19,13 +18,25 @@ jobs:
     steps:
     - name: Validate SSH Key
       run: |
+        if [ -z "${{ secrets.PROD_HOST }}" ]; then
+          echo "Missing secret: PROD_HOST"
+          exit 1
+        fi
+        if [ -z "${{ secrets.PROD_USER }}" ]; then
+          echo "Missing secret: PROD_USER"
+          exit 1
+        fi
+        if [ -z "${{ secrets.PROD_SSH_PRIVATE_KEY }}" ]; then
+          echo "Missing secret: PROD_SSH_PRIVATE_KEY"
+          exit 1
+        fi
         mkdir -p ~/.ssh
         echo "$SSH_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+        ssh-keyscan ${{ secrets.PROD_HOST }} >> ~/.ssh/known_hosts
         echo "SSH key validated successfully"
       env:
-        SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        SSH_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
 
   test-connection:
     needs: validate
@@ -35,10 +46,10 @@ jobs:
     - name: Test SSH connection
       uses: appleboy/ssh-action@v1
       with:
-        host: ${{ secrets.SSH_HOST }}
-        port: ${{ env.SSH_PORT }}
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        host: ${{ secrets.PROD_HOST }}
+        port: ${{ secrets.PROD_SSH_PORT }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
         script: |
           echo "=== SSH Connection Test ==="
           echo "Connection successful!"
@@ -156,10 +167,10 @@ jobs:
     - name: Prepare deployment directory
       uses: appleboy/ssh-action@v1
       with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ env.SSH_PORT }}
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.PROD_SSH_PORT }}
         script: |
           mkdir -p ${{ env.DEPLOY_DIR }}/uploads
           mkdir -p ${{ env.DEPLOY_DIR }}/logs
@@ -169,10 +180,10 @@ jobs:
     - name: Copy docker-compose.yml and Dockerfile to server
       uses: appleboy/scp-action@v0.1.7
       with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ env.SSH_PORT }}
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.PROD_SSH_PORT }}
         source: "docker-compose.yml,Dockerfile"
         target: "${{ env.DEPLOY_DIR }}"
         overwrite: true
@@ -180,10 +191,10 @@ jobs:
     - name: Copy Docker image to server
       uses: appleboy/scp-action@v0.1.7
       with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ env.SSH_PORT }}
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.PROD_SSH_PORT }}
         source: "${{ env.IMAGE_NAME }}.tar.gz"
         target: "/tmp"
         overwrite: true
@@ -191,10 +202,10 @@ jobs:
     - name: Create .env file on server
       uses: appleboy/ssh-action@v1
       with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ env.SSH_PORT }}
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.PROD_SSH_PORT }}
         script: |
           #!/bin/bash
           set -euo pipefail
@@ -221,10 +232,10 @@ jobs:
     - name: Deploy application
       uses: appleboy/ssh-action@v1
       with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ env.SSH_PORT }}
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.PROD_SSH_PORT }}
         envs: IMAGE_NAME,DEPLOY_DIR
         script: |
           #!/bin/bash
@@ -290,10 +301,10 @@ jobs:
     - name: Verify deployment
       uses: appleboy/ssh-action@v1
       with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        port: ${{ env.SSH_PORT }}
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USER }}
+        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.PROD_SSH_PORT }}
         script: |
           echo "=== Deployment Verification ==="
           echo "Container status:"
