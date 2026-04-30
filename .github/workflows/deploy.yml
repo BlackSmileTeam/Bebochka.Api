@@ -149,13 +149,12 @@ jobs:
         name: docker-image
         path: .
 
-    - name: Verify files exist before copying
+    - name: Verify Dockerfile exists
       run: |
-        echo "Checking files to copy..."
-        ls -la docker-compose.yml Dockerfile || exit 1
-        test -f docker-compose.yml || exit 1
+        echo "Checking Dockerfile..."
+        ls -la Dockerfile || exit 1
         test -f Dockerfile || exit 1
-        echo "✅ All files exist"
+        echo "✅ Dockerfile exists"
         
     - name: Verify Docker image exists
       run: |
@@ -177,17 +176,6 @@ jobs:
           chmod 777 ${{ env.DEPLOY_DIR }}/uploads
           echo "Uploads directory created with permissions: $(ls -ld ${{ env.DEPLOY_DIR }}/uploads)"
         
-    - name: Copy docker-compose.yml and Dockerfile to server
-      uses: appleboy/scp-action@v0.1.7
-      with:
-        host: ${{ secrets.PROD_HOST }}
-        username: ${{ secrets.PROD_USER }}
-        key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-        port: ${{ secrets.PROD_SSH_PORT }}
-        source: "docker-compose.yml,Dockerfile"
-        target: "${{ env.DEPLOY_DIR }}"
-        overwrite: true
-
     - name: Copy Docker image to server
       uses: appleboy/scp-action@v0.1.7
       with:
@@ -246,41 +234,44 @@ jobs:
           docker load < /tmp/$IMAGE_NAME.tar.gz
           rm /tmp/$IMAGE_NAME.tar.gz
 
-          cd $DEPLOY_DIR
-          
-          # Stop and remove old containers (force remove if needed)
-          docker compose down || true
-          
-          # Force remove container by name if it still exists (from old docker run)
+          # Stop and remove old container
           docker stop $IMAGE_NAME || true
           docker rm -f $IMAGE_NAME || true
 
-          # Ensure uploads directory has correct permissions
-          mkdir -p wwwroot/uploads
-          chmod -R 777 wwwroot/uploads || true
+          # Ensure uploads directory exists on host
+          mkdir -p $DEPLOY_DIR/wwwroot/uploads
+          chmod -R 777 $DEPLOY_DIR/wwwroot/uploads || true
           
-          # Start new containers using docker compose plugin (use already loaded image)
-          docker compose up -d
+          # Start container directly (no compose dependency)
+          docker run -d \
+            --name $IMAGE_NAME \
+            --restart unless-stopped \
+            -p ${{ env.HOST_PORT }}:${{ env.CONTAINER_PORT }} \
+            -v $DEPLOY_DIR/wwwroot/uploads:/app/wwwroot/uploads \
+            -e ConnectionStrings__DefaultConnection="${{ secrets.DB_CONNECTION_STRING }}" \
+            -e TelegramBot__Token="${{ secrets.TELEGRAM_BOT_TOKEN }}" \
+            -e TelegramBot__ChannelId="${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}" \
+            $IMAGE_NAME:latest
           
           # Wait a bit for container to start
           sleep 3
           
           # Check container status
           echo "Checking container status:"
-          docker compose ps
+          docker ps --filter "name=$IMAGE_NAME"
           
           # Check container logs
           echo "Container logs (last 20 lines):"
-          docker compose logs --tail=20 backend
+          docker logs --tail=20 $IMAGE_NAME
           
           # Verify permissions after container start
           echo "Checking uploads directory permissions:"
-          docker compose exec -T backend ls -ld /app/wwwroot/uploads || echo "Cannot check permissions inside container"
+          docker exec $IMAGE_NAME ls -ld /app/wwwroot/uploads || echo "Cannot check permissions inside container"
           
           # Verify Telegram configuration
           echo "Checking Telegram configuration..."
-          docker compose logs backend | grep -i "telegram\|channel" | tail -10 || echo "No Telegram logs found"
-          if docker compose exec -T backend env | grep -q "TelegramBot__ChannelId="; then
+          docker logs $IMAGE_NAME | grep -i "telegram\|channel" | tail -10 || echo "No Telegram logs found"
+          if docker exec $IMAGE_NAME env | grep -q "TelegramBot__ChannelId="; then
             echo "✅ Telegram ChannelId is configured"
           else
             echo "⚠️ Warning: Telegram ChannelId might not be configured"
@@ -318,21 +309,20 @@ jobs:
           curl -f http://localhost:${{ env.HOST_PORT }}/api/products || echo "API health check failed"
           echo ""
           echo "Uploads directory:"
-          cd ${{ env.DEPLOY_DIR }}
-          docker compose exec -T backend ls -la /app/wwwroot/uploads/ || docker exec ${{ env.IMAGE_NAME }} ls -la /app/wwwroot/uploads/ || echo "Could not list uploads"
+          docker exec ${{ env.IMAGE_NAME }} ls -la /app/wwwroot/uploads/ || echo "Could not list uploads"
           echo ""
           echo "Checking Telegram token configuration:"
-          if docker compose exec -T backend env | grep -q "TelegramBot__Token="; then
+          if docker exec ${{ env.IMAGE_NAME }} env | grep -q "TelegramBot__Token="; then
             echo "✅ Telegram token is configured"
-            docker compose exec -T backend env | grep "TelegramBot__Token" | sed 's/TelegramBot__Token=.*/TelegramBot__Token=***HIDDEN***/'
+            docker exec ${{ env.IMAGE_NAME }} env | grep "TelegramBot__Token" | sed 's/TelegramBot__Token=.*/TelegramBot__Token=***HIDDEN***/'
           else
             echo "⚠️ Warning: Telegram token might not be configured"
           fi
           echo ""
           echo "Checking Telegram ChannelId configuration:"
-          if docker compose exec -T backend env | grep -q "TelegramBot__ChannelId="; then
+          if docker exec ${{ env.IMAGE_NAME }} env | grep -q "TelegramBot__ChannelId="; then
             echo "✅ Telegram ChannelId is configured"
-            docker compose exec -T backend env | grep "TelegramBot__ChannelId"
+            docker exec ${{ env.IMAGE_NAME }} env | grep "TelegramBot__ChannelId"
           else
             echo "⚠️ Warning: Telegram ChannelId might not be configured"
           fi
