@@ -413,14 +413,21 @@ public class ProductsController : ControllerBase
     [Authorize(Roles = "Admin")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> DeleteProduct(int id)
     {
         var result = await _productService.DeleteProductAsync(id);
-        if (!result)
-            return NotFound();
-
-        return NoContent();
+        return result switch
+        {
+            ProductDeleteResult.NotFound => NotFound(),
+            ProductDeleteResult.ReferencedInOrders => Conflict(new
+            {
+                message = "Нельзя удалить товар: он указан в позициях заказов (есть история продаж)."
+            }),
+            ProductDeleteResult.Deleted => NoContent(),
+            _ => StatusCode(StatusCodes.Status500InternalServerError),
+        };
     }
 
     /// <summary>

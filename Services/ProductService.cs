@@ -216,16 +216,27 @@ public class ProductService : IProductService
     /// Deletes a product from the database
     /// </summary>
     /// <param name="id">Product identifier</param>
-    /// <returns>True if product was deleted, false if not found</returns>
-    public async Task<bool> DeleteProductAsync(int id)
+    public async Task<ProductDeleteResult> DeleteProductAsync(int id)
     {
         var product = await _context.Products.FindAsync(id);
-        if (product == null) return false;
+        if (product == null)
+            return ProductDeleteResult.NotFound;
+
+        if (await _context.OrderItems.AnyAsync(oi => oi.ProductId == id))
+            return ProductDeleteResult.ReferencedInOrders;
+
+        var cartItems = await _context.CartItems.Where(c => c.ProductId == id).ToListAsync();
+        if (cartItems.Count > 0)
+            _context.CartItems.RemoveRange(cartItems);
+
+        var reserveRows = await _context.ReserveQueue.Where(r => r.ProductId == id).ToListAsync();
+        if (reserveRows.Count > 0)
+            _context.ReserveQueue.RemoveRange(reserveRows);
 
         _context.Products.Remove(product);
         await _context.SaveChangesAsync();
 
-        return true;
+        return ProductDeleteResult.Deleted;
     }
 
     /// <summary>
