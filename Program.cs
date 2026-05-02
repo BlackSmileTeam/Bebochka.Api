@@ -141,7 +141,10 @@ builder.Services.AddCors(options =>
                 "http://127.0.0.1:3000",
                 "http://127.0.0.1:5000",
                 "http://89.104.67.36",
-                "http://89.104.67.36:80"
+                "http://89.104.67.36:80",
+                "http://157.22.199.24",
+                "http://157.22.199.24:55502",
+                "http://157.22.199.24:55501"
               )
               .SetIsOriginAllowed(origin => true) // Allow any origin for development
               .AllowAnyHeader()
@@ -276,12 +279,7 @@ app.UseStaticFiles(new StaticFileOptions
 
 app.MapControllers();
 
-// Схема и учётные записи задаются через SQL-скрипты (Database/*.sql), без сидов в коде.
-using (var scope = app.Services.CreateScope())
-{
-    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    dbContext.Database.EnsureCreated();
-}
+// Схема задаётся SQL-скриптами (Database/*.sql). EnsureCreated не добавляет таблицы в уже существующую пустую БД — импортируйте full_schema_mysql8.sql и миграции при необходимости.
 
 // Configure listening URLs
 app.Urls.Add("http://0.0.0.0:44315");
