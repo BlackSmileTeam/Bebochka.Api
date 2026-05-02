@@ -61,7 +61,7 @@ public class Order
     public decimal TotalAmount { get; set; }
     
     /// <summary>
-    /// Gets or sets the order status (Формирование заказа, Ожидает оплату, В сборке, На доставку, Отправлен, Отменен)
+    /// Gets or sets the order status (Формирование заказа, Ожидает оплату, В сборке, На доставку, Отправлен, Получен, Отменен)
     /// </summary>
     public string Status { get; set; } = "Ожидает оплату";
 
@@ -80,6 +80,12 @@ public class Order
     /// Gets or sets the list of order items
     /// </summary>
     public List<OrderItem> OrderItems { get; set; } = new();
+
+    /// <summary>История смены статусов.</summary>
+    public List<OrderStatusHistory> StatusHistories { get; set; } = new();
+
+    /// <summary>Отзыв клиента по заказу (если есть).</summary>
+    public OrderCustomerReview? CustomerReview { get; set; }
     
     /// <summary>
     /// Gets or sets the date and time when the order was created

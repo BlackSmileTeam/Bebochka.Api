@@ -24,8 +24,10 @@ public class OrdersController : ControllerBase
     [HttpPost]
     [ProducesResponseType(typeof(OrderDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<OrderDto>> CreateOrder([FromBody] CreateOrderDto dto)
+    public async Task<ActionResult<OrderDto>> CreateOrder([FromBody] CreateOrderDto? dto)
     {
+        if (dto == null)
+            return BadRequest(new { message = "Тело запроса обязательно" });
         try
         {
             var order = await _orderService.CreateOrderAsync(dto);
@@ -39,6 +41,43 @@ public class OrdersController : ControllerBase
         {
             return StatusCode(500, new { message = "Internal server error", error = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Клиент подтверждает получение заказа (только «Отправлен» → «Получен»). Оценка и отзыв необязательны.
+    /// </summary>
+    [HttpPost("mine/{id:int}/mark-received")]
+    [Authorize]
+    [ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<OrderDto>> MarkMyOrderReceived(int id, [FromBody] MarkOrderReceivedDto? body)
+    {
+        var userIdClaim = User.FindFirst("UserId")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst("sub")?.Value;
+        if (!int.TryParse(userIdClaim, out var userId))
+            return Unauthorized();
+        try
+        {
+            var order = await _orderService.MarkOrderReceivedByCustomerAsync(id, userId, body?.Rating, body?.Comment);
+            return Ok(order);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Совместимость: подтверждение получения заказа клиентом без сегмента /mine.
+    /// </summary>
+    [HttpPost("{id:int}/mark-received")]
+    [Authorize]
+    [ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public Task<ActionResult<OrderDto>> MarkMyOrderReceivedCompat(int id, [FromBody] MarkOrderReceivedDto? body)
+    {
+        return MarkMyOrderReceived(id, body);
     }
 
     /// <summary>
@@ -79,6 +118,18 @@ public class OrdersController : ControllerBase
     }
 
     /// <summary>
+    /// Список отзывов клиентов по заказам (admin only).
+    /// </summary>
+    [HttpGet("reviews")]
+    [Authorize(Roles = "Admin")]
+    [ProducesResponseType(typeof(List<OrderCustomerReviewAdminDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<OrderCustomerReviewAdminDto>>> GetCustomerReviews()
+    {
+        var reviews = await _orderService.GetCustomerReviewsAsync();
+        return Ok(reviews);
+    }
+
+    /// <summary>
     /// Gets all orders (for bot, no auth required)
     /// </summary>
     [HttpGet("all")]
@@ -107,7 +158,7 @@ public class OrdersController : ControllerBase
     /// <summary>
     /// Gets an order by ID (admin only)
     /// </summary>
-    [HttpGet("{id}")]
+    [HttpGet("{id:int}")]
     [Authorize]
     [ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -123,7 +174,7 @@ public class OrdersController : ControllerBase
     /// <summary>
     /// Gets an order by ID (public, for bot)
     /// </summary>
-    [HttpGet("{id}/public")]
+    [HttpGet("{id:int}/public")]
     [ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<OrderDto>> GetOrderPublic(int id)

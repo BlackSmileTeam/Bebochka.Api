@@ -214,9 +214,12 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<OrderCustomerReview>(entity =>
         {
             entity.HasKey(e => e.Id);
+            entity.Property(e => e.Rating);
+            entity.Property(e => e.CreatedAtUtc);
             entity.Property(e => e.Comment).HasColumnType("TEXT");
             entity.HasIndex(e => e.OrderId).IsUnique();
             entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.CreatedAtUtc);
             entity.HasOne(e => e.Order)
                 .WithOne(o => o.CustomerReview)
                 .HasForeignKey<OrderCustomerReview>(e => e.OrderId)
@@ -309,9 +312,12 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(120);
             entity.Property(e => e.WeightKg).HasColumnType("decimal(10,3)");
+            entity.Property(e => e.ItemCount);
             entity.Property(e => e.OrderedAmount).HasColumnType("decimal(10,2)");
             entity.Property(e => e.Profit).HasColumnType("decimal(10,2)");
             entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.CreatedAt);
+            entity.Property(e => e.UpdatedAt);
             entity.HasIndex(e => e.CreatedAt);
         });
 
@@ -320,7 +326,9 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(120);
             entity.Property(e => e.Amount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.CreatedAt);
             entity.HasIndex(e => e.IncomingShipmentId);
+            entity.HasIndex(e => e.CreatedAt);
             entity.HasOne(e => e.IncomingShipment)
                 .WithMany()
                 .HasForeignKey(e => e.IncomingShipmentId)

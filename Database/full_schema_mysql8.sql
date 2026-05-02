@@ -45,7 +45,33 @@ CREATE TABLE Products (
   CartAvailableAt DATETIME NULL,
   TelegramMessageId INT NULL,
   TelegramChatId VARCHAR(50) NULL,
+  BoxNumber VARCHAR(50) NULL,
+  IncomingShipmentId INT NULL,
   INDEX IX_Products_PublishedAt (PublishedAt)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IncomingShipments (
+  Id INT AUTO_INCREMENT PRIMARY KEY,
+  Name VARCHAR(120) NOT NULL,
+  WeightKg DECIMAL(10,3) NOT NULL DEFAULT 0,
+  ItemCount INT NOT NULL DEFAULT 0,
+  OrderedAmount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  Profit DECIMAL(10,2) NULL,
+  Notes VARCHAR(1000) NULL,
+  CreatedAt DATETIME NOT NULL,
+  UpdatedAt DATETIME NOT NULL,
+  INDEX IX_IncomingShipments_CreatedAt (CreatedAt)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IncomingShipmentExpenses (
+  Id INT AUTO_INCREMENT PRIMARY KEY,
+  IncomingShipmentId INT NOT NULL,
+  Name VARCHAR(120) NOT NULL,
+  Amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  CreatedAt DATETIME NOT NULL,
+  INDEX IX_IncomingShipmentExpenses_ShipmentId (IncomingShipmentId),
+  CONSTRAINT FK_IncomingShipmentExpenses_IncomingShipments
+    FOREIGN KEY (IncomingShipmentId) REFERENCES IncomingShipments (Id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE CartItems (
@@ -96,6 +122,7 @@ CREATE TABLE OrderItems (
   ProductName VARCHAR(255) NOT NULL,
   ProductPrice DECIMAL(10,2) NOT NULL,
   Quantity INT NOT NULL,
+  CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   TelegramCommentChatId BIGINT NULL,
   TelegramCommentMessageId INT NULL,
   AddedToParcel TINYINT(1) NOT NULL DEFAULT 0,
@@ -132,6 +159,10 @@ CREATE TABLE PhoneLoginOtps (
   CreatedAtUtc DATETIME NOT NULL,
   INDEX IX_PhoneLoginOtps_Phone (PhoneE164)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE Products
+  ADD CONSTRAINT FK_Products_IncomingShipments
+  FOREIGN KEY (IncomingShipmentId) REFERENCES IncomingShipments (Id) ON DELETE SET NULL;
 
 -- Упрощённые заглушки для остальных сущностей (Announcements, Brands, TelegramErrors) —
 -- при необходимости скопируйте из существующей миграции или сгенерируйте из EF.

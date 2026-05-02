@@ -57,7 +57,6 @@ public class BrandsController : ControllerBase
             return BadRequest(new { message = "Brand already exists" });
         }
 
-        brand.CreatedAt = DateTime.UtcNow;
         _context.Brands.Add(brand);
         await _context.SaveChangesAsync();
 

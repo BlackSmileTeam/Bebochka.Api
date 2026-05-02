@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS OrderItems (
   ProductName VARCHAR(255) NOT NULL,
   ProductPrice DECIMAL(10,2) NOT NULL,
   Quantity INT NOT NULL,
+  CreatedAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   TelegramCommentChatId BIGINT NULL,
   TelegramCommentMessageId INT NULL,
   AddedToParcel TINYINT(1) NOT NULL DEFAULT 0,

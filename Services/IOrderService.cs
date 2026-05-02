@@ -92,5 +92,15 @@ public interface IOrderService
     /// Applies fixed discount to a single order.
     /// </summary>
     Task<bool> ApplyOrderDiscountAsync(int orderId, int percent);
+
+    /// <summary>
+    /// Клиент подтверждает получение заказа (только из статуса «Отправлен»). Опционально — отзыв и оценка.
+    /// </summary>
+    Task<OrderDto> MarkOrderReceivedByCustomerAsync(int orderId, int userId, int? rating, string? comment);
+
+    /// <summary>
+    /// Список отзывов клиентов по заказам для администратора.
+    /// </summary>
+    Task<List<OrderCustomerReviewAdminDto>> GetCustomerReviewsAsync();
 }
 

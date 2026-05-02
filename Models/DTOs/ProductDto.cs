@@ -90,6 +90,10 @@ public class ProductDto
     /// Можно ли добавлять в корзину сейчас (по московскому времени).
     /// </summary>
     public bool CartUnlocked { get; set; } = true;
+
+    public string? BoxNumber { get; set; }
+    public int? IncomingShipmentId { get; set; }
+    public string? IncomingShipmentName { get; set; }
 }
 
 /// <summary>
@@ -157,6 +161,9 @@ public class CreateProductDto
     /// Когда разрешить «В корзину» (московское время); null — сразу после появления в каталоге
     /// </summary>
     public DateTime? CartAvailableAt { get; set; }
+
+    public string? BoxNumber { get; set; }
+    public int? IncomingShipmentId { get; set; }
 }
 
 /// <summary>
@@ -229,4 +236,7 @@ public class UpdateProductDto
     /// Когда разрешить «В корзину» (московское время); null — без отдельной задержки
     /// </summary>
     public DateTime? CartAvailableAt { get; set; }
+
+    public string? BoxNumber { get; set; }
+    public int? IncomingShipmentId { get; set; }
 }

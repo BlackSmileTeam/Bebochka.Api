@@ -392,9 +392,9 @@ public class TelegramController : ControllerBase
                 }
             }
 
-            // Exclude products that are in orders with status "Отправлен" (not available for channel)
+            // Exclude products that are in orders shipped or received (not available for channel)
             var sentOrderProductIds = await _context.OrderItems
-                .Where(oi => _context.Orders.Any(o => o.Id == oi.OrderId && o.Status == "Отправлен"))
+                .Where(oi => _context.Orders.Any(o => o.Id == oi.OrderId && (o.Status == "Отправлен" || o.Status == "Получен")))
                 .Select(oi => oi.ProductId)
                 .Distinct()
                 .ToListAsync();

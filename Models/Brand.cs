@@ -14,10 +14,5 @@ public class Brand
     /// Gets or sets the brand name
     /// </summary>
     public string Name { get; set; } = string.Empty;
-    
-    /// <summary>
-    /// Gets or sets the date and time when the brand was added
-    /// </summary>
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
 

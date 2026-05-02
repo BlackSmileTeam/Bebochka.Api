@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using Bebochka.Api.Data;
 using Bebochka.Api.Models;
@@ -10,6 +11,14 @@ namespace Bebochka.Api.Services;
 /// </summary>
 public class OrderService : IOrderService
 {
+    /// <summary>Статус «Получен» выставляется только клиентом с сайта, не через админку.</summary>
+    public const string StatusReceived = "Получен";
+
+    private static readonly string[] AdminSelectableStatuses =
+    {
+        "Формирование заказа", "Ожидает оплату", "В сборке", "На доставку", "Отправлен", "Отменен"
+    };
+
     private readonly AppDbContext _context;
     private readonly IEmailService _emailService;
     private readonly ITelegramNotificationService _telegramService;
@@ -25,6 +34,9 @@ public class OrderService : IOrderService
 
     public async Task<OrderDto> CreateOrderAsync(CreateOrderDto dto)
     {
+        if (dto.Items == null || dto.Items.Count == 0)
+            throw new InvalidOperationException("В заказе должна быть хотя бы одна позиция.");
+
         // Генерируем номер заказа
         var orderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
         
@@ -78,6 +90,13 @@ public class OrderService : IOrderService
             UpdatedAt = DateTime.UtcNow
         };
 
+        order.StatusHistories.Add(new OrderStatusHistory
+        {
+            Status = order.Status,
+            ChangedAtUtc = DateTime.UtcNow,
+            ChangedByUserId = dto.UserId
+        });
+
         // Удаляем товары из корзины пользователя (гость по SessionId, авторизованный — по UserId)
         List<CartItem> cartItems;
         if (dto.UserId.HasValue)
@@ -93,6 +112,8 @@ public class OrderService : IOrderService
                 .ToListAsync();
         }
         _context.CartItems.RemoveRange(cartItems);
+
+        await RemoveReserveQueueForProductsAsync(productIds);
 
         _context.Orders.Add(order);
         await _context.SaveChangesAsync();
@@ -111,7 +132,8 @@ public class OrderService : IOrderService
         User? user = null;
         if (order.UserId.HasValue)
             user = await _context.Users.FirstOrDefaultAsync(u => u.Id == order.UserId.Value);
-        return MapToDto(order, user);
+        var hasReview = await _context.OrderCustomerReviews.AnyAsync(r => r.OrderId == order.Id);
+        return MapToDto(order, user, hasReview);
     }
 
     public async Task<List<OrderDto>> GetAllOrdersAsync()
@@ -122,6 +144,7 @@ public class OrderService : IOrderService
             orders = await _context.Orders
                 .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Product)
+                .Include(o => o.StatusHistories)
                 .OrderByDescending(o => o.CreatedAt)
                 .ToListAsync();
         }
@@ -139,7 +162,9 @@ public class OrderService : IOrderService
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => u);
 
-        return orders.Select(o => MapToDto(o, users.GetValueOrDefault(o.UserId ?? 0))).ToList();
+        var reviewedOrderIds = (await _context.OrderCustomerReviews.Select(r => r.OrderId).ToListAsync()).ToHashSet();
+
+        return orders.Select(o => MapToDto(o, users.GetValueOrDefault(o.UserId ?? 0), reviewedOrderIds.Contains(o.Id))).ToList();
     }
 
     public async Task<OrderDto?> GetOrderByIdAsync(int id)
@@ -147,6 +172,7 @@ public class OrderService : IOrderService
         var order = await _context.Orders
             .Include(o => o.OrderItems)
             .ThenInclude(oi => oi.Product)
+            .Include(o => o.StatusHistories)
             .FirstOrDefaultAsync(o => o.Id == id);
 
         if (order == null)
@@ -158,7 +184,8 @@ public class OrderService : IOrderService
             user = await _context.Users.FirstOrDefaultAsync(u => u.Id == order.UserId.Value);
         }
 
-        return MapToDto(order, user);
+        var hasReview = await _context.OrderCustomerReviews.AnyAsync(r => r.OrderId == id);
+        return MapToDto(order, user, hasReview);
     }
 
     public async Task<List<OrderDto>> GetUserOrdersAsync(int userId)
@@ -169,6 +196,7 @@ public class OrderService : IOrderService
             orders = await _context.Orders
                 .Include(o => o.OrderItems)
                 .ThenInclude(oi => oi.Product)
+                .Include(o => o.StatusHistories)
                 .Where(o => o.UserId == userId)
                 .OrderByDescending(o => o.CreatedAt)
                 .ToListAsync();
@@ -184,7 +212,12 @@ public class OrderService : IOrderService
 
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
 
-        return orders.Select(o => MapToDto(o, user)).ToList();
+        var reviewedOrderIds = (await _context.OrderCustomerReviews
+            .Where(r => r.UserId == userId)
+            .Select(r => r.OrderId)
+            .ToListAsync()).ToHashSet();
+
+        return orders.Select(o => MapToDto(o, user, reviewedOrderIds.Contains(o.Id))).ToList();
     }
 
     public async Task<bool> CancelOrderAsync(int orderId, string? reason = null)
@@ -196,7 +229,7 @@ public class OrderService : IOrderService
         if (order == null)
             return false;
 
-        if (order.Status == "Отправлен" || order.Status == "Отменен")
+        if (order.Status == "Отправлен" || order.Status == StatusReceived || order.Status == "Отменен")
             return false;
 
         // Return products to stock
@@ -214,18 +247,32 @@ public class OrderService : IOrderService
         order.CancellationReason = reason;
         order.UpdatedAt = DateTime.UtcNow;
 
+        _context.OrderStatusHistories.Add(new OrderStatusHistory
+        {
+            OrderId = order.Id,
+            Status = "Отменен",
+            ChangedAtUtc = DateTime.UtcNow,
+            ChangedByUserId = GetActorUserIdFromHttp()
+        });
+
         await _context.SaveChangesAsync();
         return true;
     }
 
     public async Task<bool> UpdateOrderStatusAsync(int orderId, string status)
     {
-        var validStatuses = new[] { "Формирование заказа", "Ожидает оплату", "В сборке", "На доставку", "Отправлен", "Отменен" };
-        if (!validStatuses.Contains(status))
+        if (status == StatusReceived)
+            return false;
+
+        if (!AdminSelectableStatuses.Contains(status))
             return false;
 
         var order = await _context.Orders.FindAsync(orderId);
         if (order == null)
+            return false;
+
+        // После подтверждения получения клиентом статус менять нельзя.
+        if (order.Status == StatusReceived)
             return false;
 
         var previousStatus = order.Status;
@@ -236,6 +283,24 @@ public class OrderService : IOrderService
         {
             order.CancelledAt = DateTime.UtcNow;
         }
+
+        if (status == "Отправлен")
+        {
+            var shippedProductIds = await _context.OrderItems
+                .Where(oi => oi.OrderId == orderId)
+                .Select(oi => oi.ProductId)
+                .Distinct()
+                .ToListAsync();
+            await RemoveReserveQueueForProductsAsync(shippedProductIds);
+        }
+
+        _context.OrderStatusHistories.Add(new OrderStatusHistory
+        {
+            OrderId = orderId,
+            Status = status,
+            ChangedAtUtc = DateTime.UtcNow,
+            ChangedByUserId = GetActorUserIdFromHttp()
+        });
 
         await _context.SaveChangesAsync();
 
@@ -313,9 +378,10 @@ public class OrderService : IOrderService
             PendingOrders = orders.Count(o => o.Status == "В сборке"),
             OnDeliveryOrders = orders.Count(o => o.Status == "На доставку"),
             SentOrders = orders.Count(o => o.Status == "Отправлен"),
+            ReceivedOrders = orders.Count(o => o.Status == StatusReceived),
             CancelledOrders = orders.Count(o => o.Status == "Отменен"),
-            TotalRevenue = orders.Where(o => o.Status == "Отправлен").Sum(o => GetFinalAmount(o)),
-            PendingRevenue = orders.Where(o => o.Status != "Отменен" && o.Status != "Отправлен").Sum(o => GetFinalAmount(o))
+            TotalRevenue = orders.Where(o => o.Status == "Отправлен" || o.Status == StatusReceived).Sum(o => GetFinalAmount(o)),
+            PendingRevenue = orders.Where(o => o.Status != "Отменен" && o.Status != "Отправлен" && o.Status != StatusReceived).Sum(o => GetFinalAmount(o))
         };
     }
 
@@ -338,6 +404,9 @@ public class OrderService : IOrderService
             .Include(oi => oi.Product)
             .FirstOrDefaultAsync(oi => oi.OrderId == orderId && oi.Id == itemId);
         if (item == null || item.Order == null || item.Product == null)
+            return false;
+
+        if (item.Order.Status != "В сборке")
             return false;
 
         if (item.TelegramCommentChatId.HasValue && item.TelegramCommentMessageId.HasValue)
@@ -420,10 +489,17 @@ public class OrderService : IOrderService
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
                     };
+                    newOrder.StatusHistories.Add(new OrderStatusHistory
+                    {
+                        Status = newOrder.Status,
+                        ChangedAtUtc = DateTime.UtcNow,
+                        ChangedByUserId = nextUser.Id
+                    });
                     _context.Orders.Add(newOrder);
                 }
                 // При передаче следующему в очереди остаток не уменьшаем (заказы через канал не меняют остаток)
-                _context.ReserveQueue.Remove(nextQueue);
+                // Товар снова в одном заказе — остальные в очереди по этому товару неактуальны
+                await RemoveReserveQueueForProductsAsync(new[] { product.Id });
             }
             else
             {
@@ -446,8 +522,11 @@ public class OrderService : IOrderService
     public async Task<bool> SetOrderItemAddedToParcelAsync(int orderId, int itemId, bool addedToParcel)
     {
         var item = await _context.OrderItems
+            .Include(oi => oi.Order)
             .FirstOrDefaultAsync(oi => oi.OrderId == orderId && oi.Id == itemId);
-        if (item == null)
+        if (item == null || item.Order == null)
+            return false;
+        if (item.Order.Status != "В сборке")
             return false;
         item.AddedToParcel = addedToParcel;
         await _context.SaveChangesAsync();
@@ -461,7 +540,7 @@ public class OrderService : IOrderService
         if (product == null)
             return new ReserveFromTelegramResultDto { Success = false, Reason = "ProductNotFound" };
 
-        var activeStatuses = new[] { "Ожидает оплату", "В сборке", "На доставку", "Отправлен" };
+        var activeStatuses = new[] { "Ожидает оплату", "В сборке", "На доставку", "Отправлен", StatusReceived };
         var alreadyReserved = await _context.OrderItems
             .AnyAsync(oi => oi.ProductId == product.Id && _context.Orders.Any(o => o.Id == oi.OrderId && activeStatuses.Contains(o.Status)));
         if (alreadyReserved)
@@ -575,10 +654,17 @@ public class OrderService : IOrderService
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             };
+            order.StatusHistories.Add(new OrderStatusHistory
+            {
+                Status = order.Status,
+                ChangedAtUtc = DateTime.UtcNow,
+                ChangedByUserId = user.Id
+            });
             _context.Orders.Add(order);
         }
 
         // Количество на складе при оформлении заказа через канал не уменьшаем
+        await RemoveReserveQueueForProductsAsync(new[] { product.Id });
         await _context.SaveChangesAsync();
 
         try
@@ -590,7 +676,85 @@ public class OrderService : IOrderService
             Console.WriteLine($"Failed to send order email for telegram reserve: {ex.Message}");
         }
 
-        return new ReserveFromTelegramResultDto { Success = true, Order = MapToDto(order, user) };
+        var hasReview = await _context.OrderCustomerReviews.AnyAsync(r => r.OrderId == order.Id);
+        return new ReserveFromTelegramResultDto { Success = true, Order = MapToDto(order, user, hasReview) };
+    }
+
+    public async Task<OrderDto> MarkOrderReceivedByCustomerAsync(int orderId, int userId, int? rating, string? comment)
+    {
+        var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .ThenInclude(oi => oi.Product)
+            .Include(o => o.StatusHistories)
+            .FirstOrDefaultAsync(o => o.Id == orderId);
+        if (order == null)
+            throw new InvalidOperationException("Заказ не найден");
+        if (order.UserId != userId)
+            throw new InvalidOperationException("Нет доступа к этому заказу");
+        if (order.Status != "Отправлен")
+            throw new InvalidOperationException("Подтвердить получение можно только для отправленного заказа");
+
+        if (rating.HasValue && (rating.Value < 1 || rating.Value > 5))
+            throw new InvalidOperationException("Оценка должна быть от 1 до 5");
+
+        var trimmed = string.IsNullOrWhiteSpace(comment) ? null : comment.Trim();
+        if (trimmed != null && trimmed.Length > 4000)
+            trimmed = trimmed[..4000];
+
+        var wantReview = rating.HasValue || !string.IsNullOrEmpty(trimmed);
+        if (wantReview && await _context.OrderCustomerReviews.AnyAsync(r => r.OrderId == orderId))
+            throw new InvalidOperationException("Отзыв по этому заказу уже оставлен");
+
+        order.Status = StatusReceived;
+        order.UpdatedAt = DateTime.UtcNow;
+        order.StatusHistories.Add(new OrderStatusHistory
+        {
+            Status = StatusReceived,
+            ChangedAtUtc = DateTime.UtcNow,
+            ChangedByUserId = userId
+        });
+
+        if (wantReview)
+        {
+            _context.OrderCustomerReviews.Add(new OrderCustomerReview
+            {
+                OrderId = orderId,
+                UserId = userId,
+                Rating = rating,
+                Comment = trimmed,
+                CreatedAtUtc = DateTime.UtcNow
+            });
+        }
+
+        await _context.SaveChangesAsync();
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
+        return MapToDto(order, user, wantReview);
+    }
+
+    public async Task<List<OrderCustomerReviewAdminDto>> GetCustomerReviewsAsync()
+    {
+        var reviews = await _context.OrderCustomerReviews
+            .Include(r => r.Order)
+            .Include(r => r.User)
+            .OrderByDescending(r => r.CreatedAtUtc)
+            .ToListAsync();
+
+        return reviews.Select(r => new OrderCustomerReviewAdminDto
+        {
+            Id = r.Id,
+            OrderId = r.OrderId,
+            OrderNumber = r.Order?.OrderNumber ?? $"#{r.OrderId}",
+            UserId = r.UserId,
+            CustomerName = r.User?.FullName
+                ?? r.User?.Username
+                ?? r.Order?.CustomerName
+                ?? $"Пользователь #{r.UserId}",
+            CustomerPhone = r.Order?.CustomerPhone ?? r.User?.Phone,
+            Rating = r.Rating,
+            Comment = r.Comment,
+            CreatedAtUtc = r.CreatedAtUtc
+        }).ToList();
     }
 
     public async Task ApplyDiscountToOrdersAsync(IEnumerable<int> orderIds, string discountType, int? fixedPercent, int? condition1, int? condition3, int? condition5Plus)
@@ -637,6 +801,21 @@ public class OrderService : IOrderService
         return true;
     }
 
+    /// <summary>
+    /// Удаляет все записи очереди резерва («беру» / сайт) по указанным товарам — после оформления заказа или продажи слоты недействительны.
+    /// </summary>
+    private async Task RemoveReserveQueueForProductsAsync(IEnumerable<int> productIds)
+    {
+        var ids = productIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return;
+        var entries = await _context.ReserveQueue
+            .Where(r => ids.Contains(r.ProductId))
+            .ToListAsync();
+        if (entries.Count > 0)
+            _context.ReserveQueue.RemoveRange(entries);
+    }
+
     private static int GetEffectiveDiscountPercent(Order order)
     {
         if (string.IsNullOrEmpty(order.DiscountType) || order.DiscountType == "None")
@@ -659,8 +838,39 @@ public class OrderService : IOrderService
         return order.TotalAmount * (100 - pct) / 100m;
     }
 
-    private static OrderDto MapToDto(Order order, User? user = null)
+    private int? GetActorUserIdFromHttp()
     {
+        var user = _httpContextAccessor.HttpContext?.User;
+        if (user?.Identity?.IsAuthenticated != true)
+            return null;
+        var v = user.FindFirst("UserId")?.Value
+                ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? user.FindFirst("sub")?.Value;
+        return int.TryParse(v, out var id) ? id : null;
+    }
+
+    private static string ActorKindLabel(int? changedByUserId, int? orderUserId)
+    {
+        if (changedByUserId == null)
+            return "Система";
+        if (orderUserId.HasValue && changedByUserId.Value == orderUserId.Value)
+            return "Клиент";
+        return "Администратор";
+    }
+
+    private static OrderDto MapToDto(Order order, User? user = null, bool hasCustomerReview = false)
+    {
+        var history = (order.StatusHistories ?? new List<OrderStatusHistory>())
+            .OrderBy(h => h.ChangedAtUtc)
+            .Select(h => new OrderStatusHistoryDto
+            {
+                Status = h.Status,
+                ChangedAtUtc = h.ChangedAtUtc,
+                ChangedByUserId = h.ChangedByUserId,
+                ActorKind = ActorKindLabel(h.ChangedByUserId, order.UserId)
+            })
+            .ToList();
+
         return new OrderDto
         {
             Id = order.Id,
@@ -699,7 +909,9 @@ public class OrderService : IOrderService
             UserId = order.UserId,
             CustomerProfileLink = order.CustomerProfileLink ?? (user?.TelegramUserId != null ? "tg://openmessage?user_id=" + user.TelegramUserId : null),
             TelegramUserId = user?.TelegramUserId,
-            TelegramUsername = user != null ? (user.FullName ?? (user.Username != null && !user.Username.StartsWith("telegram_") ? user.Username : null)) ?? order.CustomerName : null
+            TelegramUsername = user != null ? (user.FullName ?? (user.Username != null && !user.Username.StartsWith("telegram_") ? user.Username : null)) ?? order.CustomerName : null,
+            StatusHistory = history,
+            HasCustomerReview = hasCustomerReview
         };
     }
 }

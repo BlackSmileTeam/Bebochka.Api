@@ -32,6 +32,49 @@ public class OrderDto
     public int? UserId { get; set; }
     public long? TelegramUserId { get; set; }
     public string? TelegramUsername { get; set; }
+
+    /// <summary>История смены статусов (хронологически).</summary>
+    public List<OrderStatusHistoryDto> StatusHistory { get; set; } = new();
+
+    /// <summary>У клиента уже есть отзыв по этому заказу.</summary>
+    public bool HasCustomerReview { get; set; }
+}
+
+/// <summary>
+/// Запись истории статуса для API.
+/// </summary>
+public class OrderStatusHistoryDto
+{
+    public string Status { get; set; } = string.Empty;
+    public DateTime ChangedAtUtc { get; set; }
+    public int? ChangedByUserId { get; set; }
+    /// <summary>Клиент, Администратор или Система.</summary>
+    public string ActorKind { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Подтверждение получения заказа клиентом; оценка и отзыв необязательны.
+/// </summary>
+public class MarkOrderReceivedDto
+{
+    public int? Rating { get; set; }
+    public string? Comment { get; set; }
+}
+
+/// <summary>
+/// Отзыв клиента для административного просмотра.
+/// </summary>
+public class OrderCustomerReviewAdminDto
+{
+    public int Id { get; set; }
+    public int OrderId { get; set; }
+    public string OrderNumber { get; set; } = string.Empty;
+    public int? UserId { get; set; }
+    public string CustomerName { get; set; } = string.Empty;
+    public string? CustomerPhone { get; set; }
+    public int? Rating { get; set; }
+    public string? Comment { get; set; }
+    public DateTime CreatedAtUtc { get; set; }
 }
 
 /// <summary>

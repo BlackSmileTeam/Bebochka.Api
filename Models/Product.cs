@@ -124,4 +124,19 @@ public class Product
     /// Stored as string to avoid issues with different ID formats.
     /// </summary>
     public string? TelegramChatId { get; set; }
+
+    /// <summary>
+    /// Gets or sets box identifier where product is currently stored (admin only field).
+    /// </summary>
+    public string? BoxNumber { get; set; }
+
+    /// <summary>
+    /// Gets or sets incoming shipment identifier from which product arrived.
+    /// </summary>
+    public int? IncomingShipmentId { get; set; }
+
+    /// <summary>
+    /// Navigation property to incoming shipment.
+    /// </summary>
+    public IncomingShipment? IncomingShipment { get; set; }
 }

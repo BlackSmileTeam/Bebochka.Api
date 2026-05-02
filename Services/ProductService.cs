@@ -47,6 +47,10 @@ public class ProductService : IProductService
             .ToListAsync();
         
         var reservedQuantities = reservedItems.ToDictionary(x => x.ProductId, x => x.Reserved);
+        var shipmentIds = products.Where(p => p.IncomingShipmentId.HasValue).Select(p => p.IncomingShipmentId!.Value).Distinct().ToList();
+        var shipmentNames = await _context.IncomingShipments
+            .Where(s => shipmentIds.Contains(s.Id))
+            .ToDictionaryAsync(s => s.Id, s => s.Name);
 
         return products.Select(p => 
         {
@@ -54,6 +58,8 @@ public class ProductService : IProductService
             // Вычисляем доступное количество (общее - зарезервированное)
             var reserved = reservedQuantities.GetValueOrDefault(p.Id, 0);
             dto.AvailableQuantity = Math.Max(0, p.QuantityInStock - reserved);
+            if (p.IncomingShipmentId.HasValue)
+                dto.IncomingShipmentName = shipmentNames.GetValueOrDefault(p.IncomingShipmentId.Value);
             return dto;
         }).ToList();
     }
@@ -82,6 +88,11 @@ public class ProductService : IProductService
 
         // Вычисляем доступное количество (общее - зарезервированное)
         dto.AvailableQuantity = Math.Max(0, product.QuantityInStock - reservedQuantity);
+        if (product.IncomingShipmentId.HasValue)
+            dto.IncomingShipmentName = await _context.IncomingShipments
+                .Where(s => s.Id == product.IncomingShipmentId.Value)
+                .Select(s => s.Name)
+                .FirstOrDefaultAsync();
 
         return dto;
     }
@@ -110,6 +121,8 @@ public class ProductService : IProductService
             Condition = dto.Condition,
             PublishedAt = dto.PublishedAt, // Store as Moscow time directly
             CartAvailableAt = dto.CartAvailableAt,
+            BoxNumber = dto.BoxNumber,
+            IncomingShipmentId = dto.IncomingShipmentId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -185,6 +198,13 @@ public class ProductService : IProductService
                 dto.CartAvailableAt.Value.Second,
                 DateTimeKind.Unspecified);
         }
+        else
+        {
+            product.CartAvailableAt = null;
+        }
+        if (dto.BoxNumber != null)
+            product.BoxNumber = dto.BoxNumber;
+        product.IncomingShipmentId = dto.IncomingShipmentId;
         product.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -242,6 +262,8 @@ public class ProductService : IProductService
             PublishedAt = product.PublishedAt,
             CartAvailableAt = product.CartAvailableAt,
             CartUnlocked = cartUnlocked,
+            BoxNumber = product.BoxNumber,
+            IncomingShipmentId = product.IncomingShipmentId,
             CreatedAt = product.CreatedAt,
             UpdatedAt = product.UpdatedAt
         };
@@ -280,7 +302,27 @@ public class ProductService : IProductService
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 
-        return products.Select(p => MapToDto(p)).ToList();
+        var productIds = products.Select(p => p.Id).ToList();
+        var reservedItems = await _context.CartItems
+            .Where(c => productIds.Contains(c.ProductId))
+            .GroupBy(c => c.ProductId)
+            .Select(g => new { ProductId = g.Key, Reserved = g.Sum(c => c.Quantity) })
+            .ToListAsync();
+        var reservedQuantities = reservedItems.ToDictionary(x => x.ProductId, x => x.Reserved);
+        var shipmentIds = products.Where(p => p.IncomingShipmentId.HasValue).Select(p => p.IncomingShipmentId!.Value).Distinct().ToList();
+        var shipmentNames = await _context.IncomingShipments
+            .Where(s => shipmentIds.Contains(s.Id))
+            .ToDictionaryAsync(s => s.Id, s => s.Name);
+
+        return products.Select(p =>
+        {
+            var dto = MapToDto(p);
+            var reserved = reservedQuantities.GetValueOrDefault(p.Id, 0);
+            dto.AvailableQuantity = Math.Max(0, p.QuantityInStock - reserved);
+            if (p.IncomingShipmentId.HasValue)
+                dto.IncomingShipmentName = shipmentNames.GetValueOrDefault(p.IncomingShipmentId.Value);
+            return dto;
+        }).ToList();
     }
     
     /// <summary>
