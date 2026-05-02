@@ -40,6 +40,10 @@ public class AppDbContext : DbContext
     /// Gets or sets the OrderItems database set
     /// </summary>
     public DbSet<OrderItem> OrderItems { get; set; }
+
+    public DbSet<OrderStatusHistory> OrderStatusHistories { get; set; }
+
+    public DbSet<OrderCustomerReview> OrderCustomerReviews { get; set; }
     
     /// <summary>
     /// Gets or sets the Announcements database set
@@ -70,6 +74,8 @@ public class AppDbContext : DbContext
     /// Аудит согласий на обработку персональных данных
     /// </summary>
     public DbSet<PersonalDataConsentLog> PersonalDataConsentLogs { get; set; }
+    public DbSet<IncomingShipment> IncomingShipments { get; set; }
+    public DbSet<IncomingShipmentExpense> IncomingShipmentExpenses { get; set; }
 
     /// <summary>
     /// Configures the entity models and their relationships
@@ -78,6 +84,14 @@ public class AppDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // MySQL на Linux с lower_case_table_names=1 хранит имена таблиц в нижнем регистре (Users -> users).
+        // Без этого Pomelo обращается к `Users`, а физическая таблица — `users` → "Table doesn't exist".
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (entityType.BaseType == null && !string.IsNullOrEmpty(entityType.GetTableName()))
+                entityType.SetTableName(entityType.GetTableName()!.ToLowerInvariant());
+        }
 
         modelBuilder.Entity<Product>(entity =>
         {
@@ -96,8 +110,15 @@ public class AppDbContext : DbContext
             entity.Property(e => e.CartAvailableAt);
             entity.Property(e => e.TelegramMessageId);
             entity.Property(e => e.TelegramChatId).HasMaxLength(50);
+            entity.Property(e => e.BoxNumber).HasMaxLength(50);
+            entity.Property(e => e.IncomingShipmentId);
             entity.HasIndex(e => e.PublishedAt);
             entity.HasIndex(e => new { e.TelegramChatId, e.TelegramMessageId });
+            entity.HasIndex(e => e.IncomingShipmentId);
+            entity.HasOne(e => e.IncomingShipment)
+                .WithMany()
+                .HasForeignKey(e => e.IncomingShipmentId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<User>(entity =>
@@ -160,6 +181,7 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.ProductName).IsRequired().HasMaxLength(255);
             entity.Property(e => e.ProductPrice).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
             entity.Property(e => e.TelegramCommentChatId);
             entity.Property(e => e.TelegramCommentMessageId);
             entity.Property(e => e.AddedToParcel).HasDefaultValue(false);
@@ -170,6 +192,38 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.Product)
                 .WithMany()
                 .HasForeignKey(e => e.ProductId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OrderStatusHistory>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(50);
+            entity.HasIndex(e => e.OrderId);
+            entity.HasIndex(e => e.ChangedAtUtc);
+            entity.HasOne(e => e.Order)
+                .WithMany(o => o.StatusHistories)
+                .HasForeignKey(e => e.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.ChangedByUser)
+                .WithMany()
+                .HasForeignKey(e => e.ChangedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<OrderCustomerReview>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Comment).HasColumnType("TEXT");
+            entity.HasIndex(e => e.OrderId).IsUnique();
+            entity.HasIndex(e => e.UserId);
+            entity.HasOne(e => e.Order)
+                .WithOne(o => o.CustomerReview)
+                .HasForeignKey<OrderCustomerReview>(e => e.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -248,6 +302,29 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<IncomingShipment>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(120);
+            entity.Property(e => e.WeightKg).HasColumnType("decimal(10,3)");
+            entity.Property(e => e.OrderedAmount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.Profit).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        modelBuilder.Entity<IncomingShipmentExpense>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(120);
+            entity.Property(e => e.Amount).HasColumnType("decimal(10,2)");
+            entity.HasIndex(e => e.IncomingShipmentId);
+            entity.HasOne(e => e.IncomingShipment)
+                .WithMany()
+                .HasForeignKey(e => e.IncomingShipmentId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
