@@ -221,6 +221,8 @@ builder.Services.AddAuthorization();
         {
             client.Timeout = TimeSpan.FromSeconds(500); // Increased timeout for sending large images (500 seconds)
         });
+
+        builder.Services.AddHttpClient();
         
         // Add background services
         builder.Services.AddHostedService<ProductPublicationService>();

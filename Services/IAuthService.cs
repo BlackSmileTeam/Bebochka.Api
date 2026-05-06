@@ -11,6 +11,7 @@ public interface IAuthService
     Task<UserDto?> ValidateTokenAsync(string token);
     Task<AuthResponseDto?> RegisterAsync(RegisterDto dto);
     Task<AuthResponseDto?> LoginWithGoogleAsync(GoogleLoginDto dto);
+    Task<(AuthResponseDto? Response, string? ErrorCode)> CompleteVkOAuthAsync(string code, VkOAuthState state, CancellationToken cancellationToken = default);
     Task<bool> SendPhoneLoginCodeAsync(PhoneSendCodeDto dto);
     Task<AuthResponseDto?> VerifyPhoneLoginAsync(PhoneVerifyDto dto);
     Task MergeGuestCartAsync(int userId, string sessionId);

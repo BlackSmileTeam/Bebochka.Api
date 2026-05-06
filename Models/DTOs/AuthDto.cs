@@ -78,6 +78,16 @@ public class GoogleLoginDto
 }
 
 /// <summary>
+/// Состояние OAuth VK (кодируется в параметре state при редиректе на oauth.vk.com).
+/// </summary>
+public class VkOAuthState
+{
+    public string ReturnUrl { get; set; } = "/";
+    public string? SessionId { get; set; }
+    public bool AcceptPersonalDataProcessing { get; set; }
+}
+
+/// <summary>
 /// Запрос кода на телефон
 /// </summary>
 public class PhoneSendCodeDto

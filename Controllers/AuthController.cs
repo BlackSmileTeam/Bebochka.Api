@@ -1,5 +1,8 @@
+using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
 using Bebochka.Api.Exceptions;
 using Bebochka.Api.Models.DTOs;
 using Bebochka.Api.Services;
@@ -15,10 +18,20 @@ namespace Bebochka.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
+    private readonly IConfiguration _configuration;
 
-    public AuthController(IAuthService authService)
+    public AuthController(IAuthService authService, IConfiguration configuration)
     {
         _authService = authService;
+        _configuration = configuration;
+    }
+
+    private static string SafeReturnPath(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "/";
+        var p = raw.Trim();
+        if (!p.StartsWith('/') || p.StartsWith("//", StringComparison.Ordinal)) return "/";
+        return p.Length > 2000 ? "/" : p;
     }
 
     [HttpPost("login")]
@@ -96,6 +109,97 @@ public class AuthController : ControllerBase
         {
             return BadRequest(new { message = "Для регистрации по номеру телефона необходимо принять пользовательское соглашение и согласие на обработку персональных данных." });
         }
+    }
+
+    /// <summary>
+    /// Начало входа через VK: редирект на oauth.vk.com (нужны Vk:AppId, Vk:SecureKey, Vk:RedirectUri, App:FrontendPublicUrl).
+    /// </summary>
+    [HttpGet("vk/start")]
+    [AllowAnonymous]
+    public IActionResult VkStart([FromQuery] string? returnUrl, [FromQuery] string? sessionId, [FromQuery] bool acceptPersonalDataProcessing = false)
+    {
+        var appId = _configuration["Vk:AppId"];
+        var redirectUri = _configuration["Vk:RedirectUri"];
+        var frontend = _configuration["App:FrontendPublicUrl"] ?? "http://localhost:5173";
+        var safeReturn = SafeReturnPath(returnUrl);
+
+        if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(redirectUri))
+            return Redirect($"{frontend.TrimEnd('/')}/account?returnUrl={Uri.EscapeDataString(safeReturn)}&vkError=config");
+
+        var stateObj = new VkOAuthState
+        {
+            ReturnUrl = safeReturn,
+            SessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId.Trim(),
+            AcceptPersonalDataProcessing = acceptPersonalDataProcessing
+        };
+        var json = JsonSerializer.Serialize(stateObj);
+        var stateB64 = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(json));
+
+        var vkUrl =
+            "https://oauth.vk.com/authorize?client_id=" + Uri.EscapeDataString(appId)
+            + "&display=page&redirect_uri=" + Uri.EscapeDataString(redirectUri)
+            + "&scope=" + Uri.EscapeDataString("email")
+            + "&response_type=code&v=5.131&state=" + Uri.EscapeDataString(stateB64);
+
+        return Redirect(vkUrl);
+    }
+
+    /// <summary>
+    /// Callback VK OAuth: обмен code, выпуск JWT, редирект на фронт с данными во фрагменте #bebochkaAuth=...
+    /// </summary>
+    [HttpGet("vk/callback")]
+    [AllowAnonymous]
+    public async Task<IActionResult> VkCallback([FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? error, CancellationToken cancellationToken)
+    {
+        var frontend = _configuration["App:FrontendPublicUrl"] ?? "http://localhost:5173";
+
+        if (!string.IsNullOrEmpty(error))
+            return Redirect($"{frontend.TrimEnd('/')}/account?vkError=denied");
+
+        if (string.IsNullOrEmpty(state) || string.IsNullOrEmpty(code))
+            return Redirect($"{frontend.TrimEnd('/')}/account?vkError=incomplete");
+
+        VkOAuthState stateObj;
+        try
+        {
+            var bytes = WebEncoders.Base64UrlDecode(state);
+            stateObj = JsonSerializer.Deserialize<VkOAuthState>(bytes) ?? new VkOAuthState();
+        }
+        catch
+        {
+            return Redirect($"{frontend.TrimEnd('/')}/account?vkError=state");
+        }
+
+        var safeReturn = SafeReturnPath(stateObj.ReturnUrl);
+        var (auth, err) = await _authService.CompleteVkOAuthAsync(code, stateObj, cancellationToken);
+        if (auth == null)
+        {
+            var errCode = err switch
+            {
+                "consent" => "consent",
+                "email_conflict" => "email_conflict",
+                "config" => "config",
+                _ => "failed"
+            };
+            return Redirect($"{frontend.TrimEnd('/')}/account?returnUrl={Uri.EscapeDataString(safeReturn)}&vkError={errCode}");
+        }
+
+        var options = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+        var fragmentPayload = new
+        {
+            auth.Token,
+            auth.ExpiresAt,
+            auth.Username,
+            auth.FullName,
+            auth.UserId,
+            auth.IsAdmin,
+            auth.Email
+        };
+        var fragmentJson = JsonSerializer.Serialize(fragmentPayload, options);
+        var fragB64 = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(fragmentJson));
+
+        var url = $"{frontend.TrimEnd('/')}/account?returnUrl={Uri.EscapeDataString(safeReturn)}#bebochkaAuth={fragB64}";
+        return Redirect(url);
     }
 
     [HttpPost("merge-cart")]

@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Google.Apis.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -21,16 +22,19 @@ public class AuthService : IAuthService
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IHttpClientFactory _httpClientFactory;
 
     public const string ConsentShopPhoneRegistration = "PersonalDataProcessing_ShopPhoneRegistration_v1";
     public const string ConsentGoogleRegistration = "PersonalDataProcessing_GoogleRegistration_v1";
     public const string ConsentPhoneRegistration = "PersonalDataProcessing_PhoneRegistration_v1";
+    public const string ConsentVkRegistration = "PersonalDataProcessing_VkRegistration_v1";
 
-    public AuthService(AppDbContext context, IConfiguration configuration, IHttpContextAccessor httpContextAccessor)
+    public AuthService(AppDbContext context, IConfiguration configuration, IHttpContextAccessor httpContextAccessor, IHttpClientFactory httpClientFactory)
     {
         _context = context;
         _configuration = configuration;
         _httpContextAccessor = httpContextAccessor;
+        _httpClientFactory = httpClientFactory;
     }
 
     public async Task<AuthResponseDto?> LoginAsync(LoginDto loginDto)
@@ -200,6 +204,119 @@ public class AuthService : IAuthService
         }
 
         return BuildAuthResponse(user);
+    }
+
+    public async Task<(AuthResponseDto? Response, string? ErrorCode)> CompleteVkOAuthAsync(string code, VkOAuthState state, CancellationToken cancellationToken = default)
+    {
+        var appId = _configuration["Vk:AppId"];
+        var secureKey = _configuration["Vk:SecureKey"];
+        var redirectUri = _configuration["Vk:RedirectUri"];
+        if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(secureKey) || string.IsNullOrEmpty(redirectUri))
+            return (null, "config");
+
+        if (string.IsNullOrWhiteSpace(code))
+            return (null, "token_exchange");
+
+        var client = _httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(30);
+
+        var tokenUrl =
+            "https://oauth.vk.com/access_token?client_id=" + Uri.EscapeDataString(appId)
+            + "&client_secret=" + Uri.EscapeDataString(secureKey)
+            + "&redirect_uri=" + Uri.EscapeDataString(redirectUri)
+            + "&code=" + Uri.EscapeDataString(code.Trim());
+
+        using var tokenResp = await client.GetAsync(tokenUrl, cancellationToken);
+        var tokenJson = await tokenResp.Content.ReadAsStringAsync(cancellationToken);
+
+        using var tokenDoc = JsonDocument.Parse(tokenJson);
+        var root = tokenDoc.RootElement;
+        if (root.TryGetProperty("error", out _))
+            return (null, "token_exchange");
+
+        if (!root.TryGetProperty("user_id", out var userIdEl) || !root.TryGetProperty("access_token", out var accessEl))
+            return (null, "token_exchange");
+
+        long vkUserId;
+        try
+        {
+            vkUserId = userIdEl.ValueKind == JsonValueKind.String
+                ? long.Parse(userIdEl.GetString() ?? "0", System.Globalization.CultureInfo.InvariantCulture)
+                : userIdEl.GetInt64();
+        }
+        catch
+        {
+            return (null, "token_exchange");
+        }
+
+        var accessToken = accessEl.GetString() ?? "";
+        var email = root.TryGetProperty("email", out var emEl) && emEl.ValueKind == JsonValueKind.String
+            ? emEl.GetString()
+            : null;
+
+        var infoUrl =
+            "https://api.vk.com/method/users.get?user_ids=" + vkUserId
+            + "&fields=first_name,last_name,nickname&v=5.131&lang=0&access_token="
+            + Uri.EscapeDataString(accessToken);
+
+        using var infoResp = await client.GetAsync(infoUrl, cancellationToken);
+        var infoJson = await infoResp.Content.ReadAsStringAsync(cancellationToken);
+        using var infoDoc = JsonDocument.Parse(infoJson);
+        var infoRoot = infoDoc.RootElement;
+        if (infoRoot.TryGetProperty("error", out _))
+            return (null, "user_info");
+
+        string? fullName = null;
+        if (infoRoot.TryGetProperty("response", out var responseArr) && responseArr.ValueKind == JsonValueKind.Array && responseArr.GetArrayLength() > 0)
+        {
+            var u = responseArr[0];
+            var fn = u.TryGetProperty("first_name", out var f) ? f.GetString() : "";
+            var ln = u.TryGetProperty("last_name", out var l) ? l.GetString() : "";
+            fullName = string.Join(' ', new[] { fn, ln }.Where(s => !string.IsNullOrEmpty(s)));
+            if (string.IsNullOrWhiteSpace(fullName))
+                fullName = null;
+        }
+
+        var user = await _context.Users.FirstOrDefaultAsync(x => x.VkUserId == vkUserId, cancellationToken);
+        if (user == null)
+        {
+            if (!state.AcceptPersonalDataProcessing)
+                return (null, "consent");
+
+            if (!string.IsNullOrEmpty(email))
+            {
+                var emailLower = email.Trim().ToLowerInvariant();
+                if (await _context.Users.AnyAsync(x => x.Email != null && x.Email.ToLower() == emailLower, cancellationToken))
+                    return (null, "email_conflict");
+            }
+
+            var username = await MakeUniqueUsernameAsync("vk_" + vkUserId);
+            user = new User
+            {
+                Username = username,
+                PasswordHash = BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString()),
+                Email = string.IsNullOrEmpty(email) ? null : email.Trim(),
+                FullName = fullName,
+                VkUserId = vkUserId,
+                IsActive = true,
+                IsAdmin = false,
+                CreatedAt = DateTime.UtcNow
+            };
+            _context.Users.Add(user);
+            await _context.SaveChangesAsync(cancellationToken);
+
+            await LogPersonalDataConsentAsync(user.Id, ConsentVkRegistration);
+        }
+        else
+        {
+            user.LastLoginAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+
+        if (!string.IsNullOrEmpty(state.SessionId))
+            await MergeGuestCartAsync(user.Id, state.SessionId);
+
+        return (BuildAuthResponse(user), null);
     }
 
     public async Task<bool> SendPhoneLoginCodeAsync(PhoneSendCodeDto dto)

@@ -34,6 +34,11 @@ public class User
     /// Google OAuth subject (unique per Google account)
     /// </summary>
     public string? GoogleSub { get; set; }
+
+    /// <summary>
+    /// VK user id (numeric id from VK OAuth)
+    /// </summary>
+    public long? VkUserId { get; set; }
     
     /// <summary>
     /// Gets or sets the user's full name

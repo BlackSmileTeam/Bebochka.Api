@@ -131,11 +131,13 @@ public class AppDbContext : DbContext
             entity.Property(e => e.TelegramUserId);
             entity.Property(e => e.Phone).HasMaxLength(20);
             entity.Property(e => e.GoogleSub).HasMaxLength(64);
+            entity.Property(e => e.VkUserId);
             entity.Property(e => e.IsAdmin).HasDefaultValue(false);
             entity.HasIndex(e => e.Username).IsUnique();
             entity.HasIndex(e => e.TelegramUserId).IsUnique().HasFilter("[TelegramUserId] IS NOT NULL");
             entity.HasIndex(e => e.Phone).IsUnique().HasFilter("[Phone] IS NOT NULL");
             entity.HasIndex(e => e.GoogleSub).IsUnique().HasFilter("[GoogleSub] IS NOT NULL");
+            entity.HasIndex(e => e.VkUserId).IsUnique().HasFilter("[VkUserId] IS NOT NULL");
         });
 
         modelBuilder.Entity<CartItem>(entity =>
