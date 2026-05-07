@@ -34,6 +34,7 @@ public class UsersController : ControllerBase
     /// <param name="password">Password</param>
     /// <param name="email">Email (optional)</param>
     /// <param name="fullName">Full name (optional)</param>
+    /// <param name="isAdmin">Admin role flag</param>
     /// <returns>Created user</returns>
     /// <response code="201">User created successfully</response>
     /// <response code="400">Invalid input or username already exists</response>
@@ -44,7 +45,8 @@ public class UsersController : ControllerBase
         [FromForm] string username,
         [FromForm] string password,
         [FromForm] string? email = null,
-        [FromForm] string? fullName = null)
+        [FromForm] string? fullName = null,
+        [FromForm] bool isAdmin = false)
     {
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             return BadRequest(new { message = "Username and password are required" });
@@ -58,6 +60,7 @@ public class UsersController : ControllerBase
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(password),
             Email = email,
             FullName = fullName,
+            IsAdmin = isAdmin,
             IsActive = true,
             CreatedAt = DateTime.UtcNow
         };
@@ -71,7 +74,8 @@ public class UsersController : ControllerBase
             Username = user.Username,
             Email = user.Email,
             FullName = user.FullName,
-            CreatedAt = user.CreatedAt
+            CreatedAt = user.CreatedAt,
+            IsAdmin = user.IsAdmin
         });
     }
 
@@ -91,7 +95,8 @@ public class UsersController : ControllerBase
                 Username = u.Username,
                 Email = u.Email,
                 FullName = u.FullName,
-                CreatedAt = u.CreatedAt
+                CreatedAt = u.CreatedAt,
+                IsAdmin = u.IsAdmin
             })
             .ToListAsync();
 
@@ -148,7 +153,8 @@ public class UsersController : ControllerBase
             Username = user.Username,
             Email = user.Email,
             FullName = user.FullName,
-            CreatedAt = user.CreatedAt
+            CreatedAt = user.CreatedAt,
+            IsAdmin = user.IsAdmin
         });
     }
 
