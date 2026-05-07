@@ -75,6 +75,7 @@ public class UsersController : ControllerBase
             Email = user.Email,
             FullName = user.FullName,
             CreatedAt = user.CreatedAt,
+            LastLoginAt = user.LastLoginAt,
             IsAdmin = user.IsAdmin
         });
     }
@@ -96,6 +97,7 @@ public class UsersController : ControllerBase
                 Email = u.Email,
                 FullName = u.FullName,
                 CreatedAt = u.CreatedAt,
+                LastLoginAt = u.LastLoginAt,
                 IsAdmin = u.IsAdmin
             })
             .ToListAsync();
@@ -154,6 +156,7 @@ public class UsersController : ControllerBase
             Email = user.Email,
             FullName = user.FullName,
             CreatedAt = user.CreatedAt,
+            LastLoginAt = user.LastLoginAt,
             IsAdmin = user.IsAdmin
         });
     }

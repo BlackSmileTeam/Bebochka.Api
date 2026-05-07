@@ -151,6 +151,11 @@ public class UserDto
     public DateTime? CreatedAt { get; set; }
 
     /// <summary>
+    /// Gets or sets last successful login date
+    /// </summary>
+    public DateTime? LastLoginAt { get; set; }
+
+    /// <summary>
     /// Gets or sets preferred custom emoji id for channel posts (Telegram custom_emoji_id)
     /// </summary>
     public string? ChannelCustomEmojiId { get; set; }
