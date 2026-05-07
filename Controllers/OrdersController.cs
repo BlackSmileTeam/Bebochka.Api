@@ -130,6 +130,25 @@ public class OrdersController : ControllerBase
     }
 
     /// <summary>
+    /// Публичный список отзывов (без персональных данных и данных заказа).
+    /// </summary>
+    [HttpGet("reviews/public")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult> GetCustomerReviewsPublic()
+    {
+        var reviews = await _orderService.GetCustomerReviewsAsync();
+        var payload = reviews.Select(r => new
+        {
+            id = r.Id,
+            rating = r.Rating,
+            comment = r.Comment,
+            createdAtUtc = r.CreatedAtUtc
+        });
+        return Ok(payload);
+    }
+
+    /// <summary>
     /// Gets all orders (for bot, no auth required)
     /// </summary>
     [HttpGet("all")]
