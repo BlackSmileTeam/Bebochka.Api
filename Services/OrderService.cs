@@ -392,6 +392,21 @@ public class OrderService : IOrderService
             .FirstOrDefaultAsync(o => o.Id == orderId);
         if (order == null)
             return false;
+
+        // При удалении заказа возвращаем товары в общий доступный список.
+        // Исключение: позиции, добавленные из Telegram-резерва, не уменьшали остаток при создании.
+        foreach (var item in order.OrderItems)
+        {
+            if (item.TelegramCommentChatId.HasValue)
+                continue;
+
+            var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
+            if (product != null)
+            {
+                product.QuantityInStock += item.Quantity;
+            }
+        }
+
         _context.Orders.Remove(order);
         await _context.SaveChangesAsync();
         return true;
