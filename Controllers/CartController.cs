@@ -159,7 +159,7 @@ public class CartController : ControllerBase
             try
             {
                 await _context.Database.ExecuteSqlInterpolatedAsync(
-                    $"SELECT `Id` FROM `Products` WHERE `Id` = {dto.ProductId} FOR UPDATE");
+                    $"SELECT `Id` FROM `products` WHERE `Id` = {dto.ProductId} FOR UPDATE");
 
                 var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == dto.ProductId);
                 if (product == null)
