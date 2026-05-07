@@ -54,6 +54,7 @@ public class AppDbContext : DbContext
     /// Gets or sets the Brands database set
     /// </summary>
     public DbSet<Brand> Brands { get; set; }
+    public DbSet<ProductNameSuggestion> ProductNameSuggestions { get; set; }
 
     /// <summary>
     /// Gets or sets the TelegramErrors database set
@@ -277,6 +278,13 @@ public class AppDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(e => e.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<ProductNameSuggestion>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(150);
             entity.HasIndex(e => e.Name).IsUnique();
         });
 
