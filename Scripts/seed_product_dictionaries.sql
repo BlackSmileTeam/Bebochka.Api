@@ -33,7 +33,23 @@ INSERT IGNORE INTO `brands` (`Name`) VALUES
 ('PlayToday'),
 ('Mini Rodini'),
 ('Name It'),
-('Mayoral');
+('Mayoral'),
+('Bossa Nova'),
+('KotMarKot'),
+('Happy Baby'),
+('Pelican Kids'),
+('Chicco'),
+('Mothercare Baby'),
+('Gulliver Kids'),
+('Oldos'),
+('Batik Kids'),
+('Didriksons Kids'),
+('Deux par Deux'),
+('Kerry'),
+('Huppa'),
+('Lenne'),
+('Joha'),
+('Norveg Kids');
 
 INSERT IGNORE INTO `productnamesuggestions` (`Name`) VALUES
 ('Футболка'),
