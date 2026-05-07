@@ -3,6 +3,7 @@ using Bebochka.Api.Data;
 using Bebochka.Api.Models.DTOs;
 using Bebochka.Api.Services;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
 using Bebochka.Api.Helpers;
 
 namespace Bebochka.Api.Controllers;
@@ -49,6 +50,36 @@ public class ProductsController : ControllerBase
         var token = auth["Bearer ".Length..].Trim();
         var user = await _authService.ValidateTokenAsync(token);
         return user?.Id;
+    }
+
+    private static int? ToNullableInt(object? value)
+    {
+        if (value == null) return null;
+        if (value is int i) return i;
+        if (value is long l && l >= int.MinValue && l <= int.MaxValue) return (int)l;
+        return null;
+    }
+
+    private async Task NormalizeIncomingShipmentIdAsync(object dto)
+    {
+        var prop = dto.GetType().GetProperty("IncomingShipmentId");
+        if (prop == null || !prop.CanRead || !prop.CanWrite)
+            return;
+
+        var shipmentId = ToNullableInt(prop.GetValue(dto));
+        if (!shipmentId.HasValue || shipmentId.Value <= 0)
+        {
+            prop.SetValue(dto, null);
+            return;
+        }
+
+        var exists = await _context.IncomingShipments.AnyAsync(x => x.Id == shipmentId.Value);
+        if (!exists)
+        {
+            // Не даём FK-ошибке ронять сохранение: очищаем ссылку на несуществующую поставку.
+            prop.SetValue(dto, null);
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] IncomingShipmentId={shipmentId.Value} not found, set to NULL");
+        }
     }
 
     /// <summary>
@@ -202,6 +233,7 @@ public class ProductsController : ControllerBase
             }
 
             contentStopwatch.Stop();
+            await NormalizeIncomingShipmentIdAsync(dto);
             var dbStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var product = await _productService.CreateProductAsync(dto, imagePaths);
             dbStopwatch.Stop();
@@ -274,6 +306,11 @@ public class ProductsController : ControllerBase
             });
 
             return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
+        }
+        catch (DbUpdateException ex) when ((ex.InnerException?.Message ?? ex.Message).Contains("FK_Products_IncomingShipments", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] FK validation error: {ex.Message}");
+            return BadRequest(new { message = "Указанная поставка не найдена. Выберите существующую поставку или оставьте поле пустым." });
         }
         catch (Exception ex)
         {
@@ -365,6 +402,7 @@ public class ProductsController : ControllerBase
             }
 
             contentStopwatch.Stop();
+            await NormalizeIncomingShipmentIdAsync(dto);
             var dbStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var product = await _productService.UpdateProductAsync(id, dto, imagePaths);
             dbStopwatch.Stop();
@@ -393,6 +431,11 @@ public class ProductsController : ControllerBase
             }
 
             return Ok(product);
+        }
+        catch (DbUpdateException ex) when ((ex.InnerException?.Message ?? ex.Message).Contains("FK_Products_IncomingShipments", StringComparison.OrdinalIgnoreCase))
+        {
+            Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] FK validation error in update: {ex.Message}");
+            return BadRequest(new { message = "Указанная поставка не найдена. Выберите существующую поставку или очистите поле поставки." });
         }
         catch (Exception ex)
         {
