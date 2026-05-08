@@ -1,0 +1,64 @@
+name: Deploy API to production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: bebochka-api-production
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          script_stop: true
+          script: |
+            set -euo pipefail
+
+            DEPLOY_PATH="${{ secrets.PROD_DEPLOY_PATH }}"
+            if [ -z "$DEPLOY_PATH" ]; then DEPLOY_PATH="/opt/bebochka-backend"; fi
+
+            BACKEND_PUBLISH_PORT="${{ secrets.PROD_BACKEND_PUBLISH_PORT }}"
+            if [ -z "$BACKEND_PUBLISH_PORT" ]; then BACKEND_PUBLISH_PORT="55501"; fi
+
+            REPO_SSH_URL="git@github.com:${{ github.repository }}.git"
+            BRANCH="main"
+
+            mkdir -p "$DEPLOY_PATH"
+
+            if [ ! -d "$DEPLOY_PATH/.git" ]; then
+              rm -rf "$DEPLOY_PATH"
+              git clone --branch "$BRANCH" "$REPO_SSH_URL" "$DEPLOY_PATH"
+            fi
+
+            cd "$DEPLOY_PATH"
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
+            git pull --ff-only origin "$BRANCH"
+
+            umask 077
+            cat > .env <<ENVEOF
+            ASPNETCORE_ENVIRONMENT=Production
+            BACKEND_PUBLISH_PORT=${BACKEND_PUBLISH_PORT}
+            ConnectionStrings__DefaultConnection=${{ secrets.APP_CONNECTION_STRING }}
+            Jwt__Key=${{ secrets.JWT_KEY }}
+            Jwt__Issuer=BebochkaApi
+            Jwt__Audience=BebochkaClient
+            App__FrontendPublicUrl=https://bebochka.ru
+            Vk__AppId=${{ secrets.VK_APP_ID }}
+            Vk__SecureKey=${{ secrets.VK_SECURE_KEY }}
+            Vk__RedirectUri=https://bebochka.ru/api/auth/vk/callback
+            ENVEOF
+
+            docker compose -f docker-compose.yml --env-file .env up -d --build --remove-orphans
+            docker image prune -f

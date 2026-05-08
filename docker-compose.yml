@@ -1,0 +1,14 @@
+services:
+  backend:
+    build: .
+    image: bebochka-backend:local
+    container_name: bebochka-backend
+    restart: unless-stopped
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+    env_file:
+      - .env
+    ports:
+      - "${BACKEND_PUBLISH_PORT:-55501}:44315"
+    volumes:
+      - ./wwwroot:/app/wwwroot
