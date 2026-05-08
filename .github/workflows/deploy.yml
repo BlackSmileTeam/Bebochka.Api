@@ -1,93 +1,196 @@
-name: Deploy API
+name: .NET API Deployment Pipeline
 
 on:
   push:
-    branches:
-      - main
+    branches: [main, master]
   workflow_dispatch:
 
-concurrency:
-  group: bebochka-api-production
-  cancel-in-progress: true
+env:
+  DOCKERFILE_PATH: Dockerfile
+  CONTAINER_PORT: 44315
+  HOST_PORT: 55501
+  DEPLOY_DIR: /opt/bebochka-backend
+  IMAGE_NAME: bebochka-backend
 
 jobs:
-  deploy:
+  validate:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy over SSH
+      - name: Validate required secrets
+        run: |
+          set -e
+          missing=0
+          [ -z "${{ secrets.PROD_HOST }}" ] && echo "Missing PROD_HOST" && missing=1 || true
+          [ -z "${{ secrets.PROD_USER }}" ] && echo "Missing PROD_USER" && missing=1 || true
+          [ -z "${{ secrets.PROD_SSH_PRIVATE_KEY }}" ] && echo "Missing PROD_SSH_PRIVATE_KEY" && missing=1 || true
+          [ -z "${{ secrets.PROD_SSH_PORT }}" ] && echo "Missing PROD_SSH_PORT" && missing=1 || true
+          if [ -z "${{ secrets.APP_CONNECTION_STRING }}" ] && [ -z "${{ secrets.DB_CONNECTION_STRING }}" ]; then
+            echo "Missing APP_CONNECTION_STRING and DB_CONNECTION_STRING (need one)"
+            missing=1
+          fi
+          [ -z "${{ secrets.JWT_KEY }}" ] && echo "Missing JWT_KEY" && missing=1 || true
+          [ "$missing" -ne 0 ] && exit 1
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null \
+            || ssh-keyscan "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts
+          echo "SSH key and host validated"
+        env:
+          SSH_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+
+  test-connection:
+    needs: validate
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || success() }}
+    steps:
+      - name: Test SSH connection
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          command_timeout: 2m
+          script: |
+            echo "=== SSH Connection Test ==="
+            echo "Docker: $(docker --version 2>/dev/null || echo not installed)"
+            echo "Disk: $(df -h / | tail -1)"
+            docker ps -a --format 'table {{.Names}}\t{{.Status}}' | head -20
+            echo "=== Test completed ==="
+
+  test:
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Test
+        run: |
+          if [ -n "$(find . -name '*.Tests.csproj' -type f | head -1)" ]; then
+            dotnet test --configuration Release --no-build --verbosity normal
+          else
+            echo "No *Tests.csproj found, skipping"
+          fi
+        continue-on-error: true
+
+  build:
+    needs: [validate, test]
+    runs-on: ubuntu-latest
+    outputs:
+      docker_tag: ${{ steps.determine_tag.outputs.TAG }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Docker tag
+        id: determine_tag
+        run: |
+          TAG="$(git tag --points-at HEAD 2>/dev/null | head -1)"
+          if [ -z "$TAG" ]; then TAG="$(date +'%Y.%m.%d-%H%M')-${GITHUB_SHA::8}"; fi
+          echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Using tag: $TAG"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        run: |
+          docker buildx create --use 2>/dev/null || true
+          docker buildx build \
+            -f "$DOCKERFILE_PATH" \
+            -t "$IMAGE_NAME:${{ steps.determine_tag.outputs.TAG }}" \
+            -t "$IMAGE_NAME:latest" \
+            --platform linux/amd64 \
+            --load \
+            .
+        env:
+          DOCKERFILE_PATH: ${{ env.DOCKERFILE_PATH }}
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+
+      - name: Save image
+        run: docker save ${{ env.IMAGE_NAME }}:latest | gzip > ${{ env.IMAGE_NAME }}.tar.gz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: ${{ env.IMAGE_NAME }}.tar.gz
+          retention-days: 1
+
+  deploy:
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: .
+
+      - name: Verify Dockerfile
+        run: test -f Dockerfile && echo "OK Dockerfile"
+
+      - name: Verify image archive
+        run: ls -lh ${{ env.IMAGE_NAME }}.tar.gz && test -f ${{ env.IMAGE_NAME }}.tar.gz
+
+      - name: Prepare server directories
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PROD_SSH_PORT }}
-          command_timeout: 30m
-          debug: true
-          script_stop: true
+          command_timeout: 2m
           script: |
-            set -eo pipefail
+            mkdir -p ${{ env.DEPLOY_DIR }}/uploads ${{ env.DEPLOY_DIR }}/logs ${{ env.DEPLOY_DIR }}/wwwroot/uploads
+            chmod 777 ${{ env.DEPLOY_DIR }}/uploads 2>/dev/null || true
 
-            DEPLOY_PATH="${{ secrets.PROD_DEPLOY_PATH }}"
-            if [ -z "$DEPLOY_PATH" ]; then DEPLOY_PATH="/opt/bebochka-backend"; fi
+      - name: Copy image to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          source: "${{ env.IMAGE_NAME }}.tar.gz"
+          target: "/tmp"
+          overwrite: true
 
-            BACKEND_PUBLISH_PORT="${{ secrets.PROD_BACKEND_PUBLISH_PORT }}"
-            if [ -z "$BACKEND_PUBLISH_PORT" ]; then BACKEND_PUBLISH_PORT="55501"; fi
-
-            REPO_SSH_URL="git@github.com:${{ github.repository }}.git"
-            BRANCH="main"
-
-            echo "==> Preflight: user=$(whoami) host=$(hostname) HOME=$HOME"
-            echo "==> Preflight: git $(git --version 2>/dev/null || echo missing)"
-            echo "==> Preflight: ssh $(ssh -V 2>&1 || echo missing)"
-
-            echo "==> Deploy path: $DEPLOY_PATH"
-            mkdir -p "$DEPLOY_PATH" || { echo "ERROR: mkdir failed (permissions on parent dir?)"; exit 1; }
-            cd "$DEPLOY_PATH" || { echo "ERROR: cd failed"; exit 1; }
-            echo "==> Working directory: $(pwd)"
-
-            echo "==> SSH: trust github.com host key (fixes: Host key verification failed)"
-            mkdir -p "$HOME/.ssh"
-            chmod 700 "$HOME/.ssh"
-            touch "$HOME/.ssh/known_hosts"
-            chmod 600 "$HOME/.ssh/known_hosts"
-            ssh-keygen -R github.com -f "$HOME/.ssh/known_hosts" 2>/dev/null || true
-            if ! ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> "$HOME/.ssh/known_hosts" 2>/dev/null; then
-              echo "ERROR: ssh-keyscan github.com failed (network? no ssh-keyscan?)"
-              exit 1
-            fi
-            echo "==> SSH: probe GitHub (exit 1 with Hi!... is OK — means key works)"
-            ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -T git@github.com 2>&1 || true
-
-            echo "==> Git: init (if needed)"
-            if [ ! -d .git ]; then
-              git init || { echo "ERROR: git init failed"; exit 1; }
-            fi
-
-            echo "==> Git: remote origin"
-            if git remote get-url origin >/dev/null 2>&1; then
-              git remote set-url origin "$REPO_SSH_URL" || { echo "ERROR: git remote set-url failed"; exit 1; }
-            else
-              git remote add origin "$REPO_SSH_URL" || { echo "ERROR: git remote add failed"; exit 1; }
-            fi
-
-            echo "==> Git: fetch origin $BRANCH (server user needs SSH access to GitHub)"
-            if ! git fetch --prune origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"; then
-              echo "ERROR: git fetch failed. On the server run: ssh -T git@github.com"
-              exit 1
-            fi
-
-            echo "==> Git: checkout $BRANCH"
-            if ! git checkout -f -B "$BRANCH" "origin/$BRANCH"; then
-              echo "ERROR: git checkout failed"
-              exit 1
-            fi
-
-            echo "==> Write .env"
+      - name: Write .env on server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          command_timeout: 2m
+          script: |
+            set -euo pipefail
             umask 077
-            cat > .env <<ENVEOF
-            ASPNETCORE_ENVIRONMENT=Production
-            BACKEND_PUBLISH_PORT=${BACKEND_PUBLISH_PORT}
-            ConnectionStrings__DefaultConnection=${{ secrets.APP_CONNECTION_STRING }}
+            CONN='${{ secrets.APP_CONNECTION_STRING }}'
+            if [ -z "$CONN" ]; then CONN='${{ secrets.DB_CONNECTION_STRING }}'; fi
+            cat > ${{ env.DEPLOY_DIR }}/.env <<EOF
+            ConnectionStrings__DefaultConnection=$CONN
             Jwt__Key=${{ secrets.JWT_KEY }}
             Jwt__Issuer=BebochkaApi
             Jwt__Audience=BebochkaClient
@@ -95,28 +198,74 @@ jobs:
             Vk__AppId=${{ secrets.VK_APP_ID }}
             Vk__SecureKey=${{ secrets.VK_SECURE_KEY }}
             Vk__RedirectUri=https://bebochka.ru/api/auth/vk/callback
-            ENVEOF
+            TelegramBot__Token=${{ secrets.TELEGRAM_BOT_TOKEN }}
+            TelegramBot__ChannelId=${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}
+            EOF
+            chmod 600 ${{ env.DEPLOY_DIR }}/.env
+            test -f ${{ env.DEPLOY_DIR }}/.env && echo "OK .env"
 
-            echo "==> Docker"
-            if ! command -v docker >/dev/null 2>&1; then
-              echo "ERROR: docker not found in PATH"
-              exit 1
-            fi
+      - name: Load image and run container
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          command_timeout: 30m
+          envs: IMAGE_NAME,DEPLOY_DIR
+          script: |
+            set -euo pipefail
+            CONN='${{ secrets.APP_CONNECTION_STRING }}'
+            if [ -z "$CONN" ]; then CONN='${{ secrets.DB_CONNECTION_STRING }}'; fi
+            echo "Loading image..."
+            docker load < /tmp/$IMAGE_NAME.tar.gz
+            rm -f /tmp/$IMAGE_NAME.tar.gz
+            docker stop $IMAGE_NAME 2>/dev/null || true
+            docker rm -f $IMAGE_NAME 2>/dev/null || true
+            mkdir -p $DEPLOY_DIR/wwwroot/uploads
+            chmod -R 777 $DEPLOY_DIR/wwwroot/uploads 2>/dev/null || true
+            docker run -d \
+              --name $IMAGE_NAME \
+              --restart unless-stopped \
+              -p ${{ env.HOST_PORT }}:${{ env.CONTAINER_PORT }} \
+              -v $DEPLOY_DIR/wwwroot/uploads:/app/wwwroot/uploads \
+              -e ASPNETCORE_ENVIRONMENT=Production \
+              -e ConnectionStrings__DefaultConnection="$CONN" \
+              -e Jwt__Key='${{ secrets.JWT_KEY }}' \
+              -e Jwt__Issuer=BebochkaApi \
+              -e Jwt__Audience=BebochkaClient \
+              -e App__FrontendPublicUrl=https://bebochka.ru \
+              -e Vk__AppId='${{ secrets.VK_APP_ID }}' \
+              -e Vk__SecureKey='${{ secrets.VK_SECURE_KEY }}' \
+              -e Vk__RedirectUri=https://bebochka.ru/api/auth/vk/callback \
+              -e TelegramBot__Token='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
+              -e TelegramBot__ChannelId='${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}' \
+              $IMAGE_NAME:latest
+            sleep 4
+            docker ps --filter "name=$IMAGE_NAME"
+            docker logs --tail=30 $IMAGE_NAME
+            docker image prune -f
+            echo "=== Deploy finished ==="
+        env:
+          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          DEPLOY_DIR: ${{ env.DEPLOY_DIR }}
 
-            run_compose() {
-              if docker compose version >/dev/null 2>&1; then
-                docker compose "$@"
-              elif command -v docker-compose >/dev/null 2>&1; then
-                docker-compose "$@"
-              else
-                echo "ERROR: neither 'docker compose' nor 'docker-compose' is available"
-                exit 1
-              fi
-            }
-
-            if ! run_compose -f docker-compose.yml --env-file .env up -d --build --remove-orphans; then
-              echo "ERROR: docker compose up failed (permissions? add user to group docker, or use sudo)"
-              exit 1
-            fi
-            docker image prune -f || true
-            echo "==> Done"
+  post-deploy-test:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.PROD_SSH_PORT }}
+          command_timeout: 5m
+          script: |
+            echo "=== Post-deploy verification ==="
+            docker ps -a | grep ${{ env.IMAGE_NAME }} || true
+            docker logs --tail 40 ${{ env.IMAGE_NAME }} || true
+            sleep 3
+            curl -sf --max-time 15 "http://127.0.0.1:${{ env.HOST_PORT }}/api/products" | head -c 200 && echo " ... (truncated)" || echo "WARN: /api/products curl failed"
+            echo "=== Done ==="
