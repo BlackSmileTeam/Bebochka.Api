@@ -34,6 +34,24 @@ public class AuthController : ControllerBase
         return p.Length > 2000 ? "/" : p;
     }
 
+    private string ResolveFrontendBaseUrl()
+    {
+        var configured = _configuration["App:FrontendPublicUrl"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured.TrimEnd('/');
+
+        var forwardedProto = Request.Headers["X-Forwarded-Proto"].FirstOrDefault();
+        var scheme = !string.IsNullOrWhiteSpace(forwardedProto) ? forwardedProto : Request.Scheme;
+        var host = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(host))
+            host = Request.Host.Value;
+
+        if (!string.IsNullOrWhiteSpace(host))
+            return $"{scheme}://{host}".TrimEnd('/');
+
+        return "https://bebochka.ru";
+    }
+
     [HttpPost("login")]
     [ProducesResponseType(typeof(AuthResponseDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -120,7 +138,7 @@ public class AuthController : ControllerBase
     {
         var appId = _configuration["Vk:AppId"];
         var redirectUri = _configuration["Vk:RedirectUri"];
-        var frontend = _configuration["App:FrontendPublicUrl"] ?? "http://localhost:5173";
+        var frontend = ResolveFrontendBaseUrl();
         var safeReturn = SafeReturnPath(returnUrl);
 
         if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(redirectUri))
@@ -151,7 +169,7 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> VkCallback([FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? error, CancellationToken cancellationToken)
     {
-        var frontend = _configuration["App:FrontendPublicUrl"] ?? "http://localhost:5173";
+        var frontend = ResolveFrontendBaseUrl();
 
         if (!string.IsNullOrEmpty(error))
             return Redirect($"{frontend.TrimEnd('/')}/account?vkError=denied");
