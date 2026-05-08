@@ -30,13 +30,6 @@ jobs:
           fi
           [ -z "${{ secrets.JWT_KEY }}" ] && echo "Missing JWT_KEY" && missing=1 || true
           [ "$missing" -ne 0 ] && exit 1
-          CONN_CHECK='${{ secrets.DB_CONNECTION_STRING }}'
-          if [ -z "$CONN_CHECK" ]; then CONN_CHECK='${{ secrets.APP_CONNECTION_STRING }}'; fi
-          if echo "$CONN_CHECK" | grep -qiE '(^|;)(server|Server)=mysql(;|$)'; then
-            echo "ERROR: в строке подключения указан Server=mysql — такой хост есть только в docker-compose с сервисом mysql."
-            echo "Для контейнера API на VPS используйте Server=host.docker.internal (MySQL на том же сервере) или IP вашей БД."
-            exit 1
-          fi
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
@@ -234,7 +227,6 @@ jobs:
             docker run -d \
               --name $IMAGE_NAME \
               --restart unless-stopped \
-              --add-host=host.docker.internal:host-gateway \
               -p ${{ env.HOST_PORT }}:${{ env.CONTAINER_PORT }} \
               -v $DEPLOY_DIR/wwwroot/uploads:/app/wwwroot/uploads \
               -e ASPNETCORE_ENVIRONMENT=Production \
