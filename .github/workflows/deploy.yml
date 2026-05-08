@@ -24,12 +24,19 @@ jobs:
           [ -z "${{ secrets.PROD_USER }}" ] && echo "Missing PROD_USER" && missing=1 || true
           [ -z "${{ secrets.PROD_SSH_PRIVATE_KEY }}" ] && echo "Missing PROD_SSH_PRIVATE_KEY" && missing=1 || true
           [ -z "${{ secrets.PROD_SSH_PORT }}" ] && echo "Missing PROD_SSH_PORT" && missing=1 || true
-          if [ -z "${{ secrets.APP_CONNECTION_STRING }}" ] && [ -z "${{ secrets.DB_CONNECTION_STRING }}" ]; then
-            echo "Missing APP_CONNECTION_STRING and DB_CONNECTION_STRING (need one)"
+          if [ -z "${{ secrets.DB_CONNECTION_STRING }}" ] && [ -z "${{ secrets.APP_CONNECTION_STRING }}" ]; then
+            echo "Missing DB_CONNECTION_STRING and APP_CONNECTION_STRING (need one; prefer DB_CONNECTION_STRING)"
             missing=1
           fi
           [ -z "${{ secrets.JWT_KEY }}" ] && echo "Missing JWT_KEY" && missing=1 || true
           [ "$missing" -ne 0 ] && exit 1
+          CONN_CHECK='${{ secrets.DB_CONNECTION_STRING }}'
+          if [ -z "$CONN_CHECK" ]; then CONN_CHECK='${{ secrets.APP_CONNECTION_STRING }}'; fi
+          if echo "$CONN_CHECK" | grep -qiE '(^|;)(server|Server)=mysql(;|$)'; then
+            echo "ERROR: в строке подключения указан Server=mysql — такой хост есть только в docker-compose с сервисом mysql."
+            echo "Для контейнера API на VPS используйте Server=host.docker.internal (MySQL на том же сервере) или IP вашей БД."
+            exit 1
+          fi
           mkdir -p ~/.ssh
           echo "$SSH_KEY" > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
@@ -187,8 +194,8 @@ jobs:
           script: |
             set -euo pipefail
             umask 077
-            CONN='${{ secrets.APP_CONNECTION_STRING }}'
-            if [ -z "$CONN" ]; then CONN='${{ secrets.DB_CONNECTION_STRING }}'; fi
+            CONN='${{ secrets.DB_CONNECTION_STRING }}'
+            if [ -z "$CONN" ]; then CONN='${{ secrets.APP_CONNECTION_STRING }}'; fi
             cat > ${{ env.DEPLOY_DIR }}/.env <<EOF
             ConnectionStrings__DefaultConnection=$CONN
             Jwt__Key=${{ secrets.JWT_KEY }}
@@ -215,8 +222,8 @@ jobs:
           envs: IMAGE_NAME,DEPLOY_DIR
           script: |
             set -euo pipefail
-            CONN='${{ secrets.APP_CONNECTION_STRING }}'
-            if [ -z "$CONN" ]; then CONN='${{ secrets.DB_CONNECTION_STRING }}'; fi
+            CONN='${{ secrets.DB_CONNECTION_STRING }}'
+            if [ -z "$CONN" ]; then CONN='${{ secrets.APP_CONNECTION_STRING }}'; fi
             echo "Loading image..."
             docker load < /tmp/$IMAGE_NAME.tar.gz
             rm -f /tmp/$IMAGE_NAME.tar.gz
@@ -227,6 +234,7 @@ jobs:
             docker run -d \
               --name $IMAGE_NAME \
               --restart unless-stopped \
+              --add-host=host.docker.internal:host-gateway \
               -p ${{ env.HOST_PORT }}:${{ env.CONTAINER_PORT }} \
               -v $DEPLOY_DIR/wwwroot/uploads:/app/wwwroot/uploads \
               -e ASPNETCORE_ENVIRONMENT=Production \
@@ -267,5 +275,5 @@ jobs:
             docker ps -a | grep ${{ env.IMAGE_NAME }} || true
             docker logs --tail 40 ${{ env.IMAGE_NAME }} || true
             sleep 3
-            curl -sf --max-time 15 "http://127.0.0.1:${{ env.HOST_PORT }}/api/products" | head -c 200 && echo " ... (truncated)" || echo "WARN: /api/products curl failed"
+            curl -sS -f --max-time 15 -X GET "http://127.0.0.1:${{ env.HOST_PORT }}/api/products" | head -c 200 && echo " ... (truncated)" || echo "WARN: GET /api/products failed (проверьте MySQL и строку подключения)"
             echo "=== Done ==="
