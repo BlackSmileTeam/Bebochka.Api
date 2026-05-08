@@ -21,9 +21,11 @@ jobs:
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PROD_SSH_PORT }}
+          command_timeout: 30m
+          debug: true
           script_stop: true
           script: |
-            set -euo pipefail
+            set -eo pipefail
 
             DEPLOY_PATH="${{ secrets.PROD_DEPLOY_PATH }}"
             if [ -z "$DEPLOY_PATH" ]; then DEPLOY_PATH="/opt/bebochka-backend"; fi
@@ -34,19 +36,31 @@ jobs:
             REPO_SSH_URL="git@github.com:${{ github.repository }}.git"
             BRANCH="main"
 
-            mkdir -p "$DEPLOY_PATH"
-            cd "$DEPLOY_PATH"
+            echo "==> Deploy path: $DEPLOY_PATH"
+            mkdir -p "$DEPLOY_PATH" || { echo "ERROR: mkdir failed (permissions on parent dir?)"; exit 1; }
+            cd "$DEPLOY_PATH" || { echo "ERROR: cd failed"; exit 1; }
 
-            # Не делаем rm -rf "$DEPLOY_PATH": у пользователя deploy обычно нет прав удалять каталог из /opt.
+            echo "==> Git: init / remote"
             if [ ! -d .git ]; then
               git init
               git remote add origin "$REPO_SSH_URL"
             else
               git remote set-url origin "$REPO_SSH_URL"
             fi
-            git fetch origin "$BRANCH"
-            git checkout -f -B "$BRANCH" "origin/$BRANCH"
 
+            echo "==> Git: fetch origin $BRANCH (needs SSH key to GitHub for user deploy on this server)"
+            if ! git fetch --prune origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"; then
+              echo "ERROR: git fetch failed. On the server run: ssh -T git@github.com"
+              exit 1
+            fi
+
+            echo "==> Git: checkout $BRANCH"
+            if ! git checkout -f -B "$BRANCH" "origin/$BRANCH"; then
+              echo "ERROR: git checkout failed"
+              exit 1
+            fi
+
+            echo "==> Write .env"
             umask 077
             cat > .env <<ENVEOF
             ASPNETCORE_ENVIRONMENT=Production
@@ -61,5 +75,24 @@ jobs:
             Vk__RedirectUri=https://bebochka.ru/api/auth/vk/callback
             ENVEOF
 
-            docker compose -f docker-compose.yml --env-file .env up -d --build --remove-orphans
-            docker image prune -f
+            echo "==> Docker"
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "ERROR: docker not found in PATH"
+              exit 1
+            fi
+            if docker compose version >/dev/null 2>&1; then
+              COMPOSE=(docker compose)
+            elif command -v docker-compose >/dev/null 2>&1; then
+              COMPOSE=(docker-compose)
+            else
+              echo "ERROR: neither 'docker compose' nor 'docker-compose' is available"
+              exit 1
+            fi
+            echo "Using: ${COMPOSE[*]}"
+
+            if ! "${COMPOSE[@]}" -f docker-compose.yml --env-file .env up -d --build --remove-orphans; then
+              echo "ERROR: docker compose up failed (permissions? add user to group docker, or use sudo)"
+              exit 1
+            fi
+            docker image prune -f || true
+            echo "==> Done"
