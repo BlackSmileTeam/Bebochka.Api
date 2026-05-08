@@ -35,16 +35,17 @@ jobs:
             BRANCH="main"
 
             mkdir -p "$DEPLOY_PATH"
-
-            if [ ! -d "$DEPLOY_PATH/.git" ]; then
-              rm -rf "$DEPLOY_PATH"
-              git clone --branch "$BRANCH" "$REPO_SSH_URL" "$DEPLOY_PATH"
-            fi
-
             cd "$DEPLOY_PATH"
+
+            # Не делаем rm -rf "$DEPLOY_PATH": у пользователя deploy обычно нет прав удалять каталог из /opt.
+            if [ ! -d .git ]; then
+              git init
+              git remote add origin "$REPO_SSH_URL"
+            else
+              git remote set-url origin "$REPO_SSH_URL"
+            fi
             git fetch origin "$BRANCH"
-            git checkout "$BRANCH"
-            git pull --ff-only origin "$BRANCH"
+            git checkout -f -B "$BRANCH" "origin/$BRANCH"
 
             umask 077
             cat > .env <<ENVEOF
