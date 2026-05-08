@@ -1,3 +1,6 @@
+# Только API. MySQL — ваш существующий сервер: в .env задайте ConnectionStrings__DefaultConnection
+# с реальным хостом (IP, DNS). Имя mysql подходит только если БД в том же compose со сервисом mysql.
+
 services:
   backend:
     build: .
@@ -12,3 +15,6 @@ services:
       - "${BACKEND_PUBLISH_PORT:-55501}:44315"
     volumes:
       - ./wwwroot:/app/wwwroot
+    # Если MySQL на том же хосте, что и Docker (Linux), раскомментируйте:
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
