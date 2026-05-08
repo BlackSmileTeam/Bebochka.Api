@@ -80,17 +80,19 @@ jobs:
               echo "ERROR: docker not found in PATH"
               exit 1
             fi
-            if docker compose version >/dev/null 2>&1; then
-              COMPOSE=(docker compose)
-            elif command -v docker-compose >/dev/null 2>&1; then
-              COMPOSE=(docker-compose)
-            else
-              echo "ERROR: neither 'docker compose' nor 'docker-compose' is available"
-              exit 1
-            fi
-            echo "Using: ${COMPOSE[*]}"
 
-            if ! "${COMPOSE[@]}" -f docker-compose.yml --env-file .env up -d --build --remove-orphans; then
+            run_compose() {
+              if docker compose version >/dev/null 2>&1; then
+                docker compose "$@"
+              elif command -v docker-compose >/dev/null 2>&1; then
+                docker-compose "$@"
+              else
+                echo "ERROR: neither 'docker compose' nor 'docker-compose' is available"
+                exit 1
+              fi
+            }
+
+            if ! run_compose -f docker-compose.yml --env-file .env up -d --build --remove-orphans; then
               echo "ERROR: docker compose up failed (permissions? add user to group docker, or use sudo)"
               exit 1
             fi
