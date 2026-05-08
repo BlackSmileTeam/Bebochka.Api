@@ -5,6 +5,14 @@ on:
     branches: [main, master]
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: deploy-api-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DOCKERFILE_PATH: Dockerfile
   CONTAINER_PORT: 44315
@@ -13,7 +21,7 @@ env:
   IMAGE_NAME: bebochka-backend
 
 jobs:
-  validate:
+  preflight:
     runs-on: ubuntu-latest
     steps:
       - name: Validate required secrets
@@ -30,21 +38,9 @@ jobs:
           fi
           [ -z "${{ secrets.JWT_KEY }}" ] && echo "Missing JWT_KEY" && missing=1 || true
           [ "$missing" -ne 0 ] && exit 1
-          mkdir -p ~/.ssh
-          echo "$SSH_KEY" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -p "${{ secrets.PROD_SSH_PORT }}" "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null \
-            || ssh-keyscan "${{ secrets.PROD_HOST }}" >> ~/.ssh/known_hosts
-          echo "SSH key and host validated"
-        env:
-          SSH_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          echo "Secrets OK"
 
-  test-connection:
-    needs: validate
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || success() }}
-    steps:
-      - name: Test SSH connection
+      - name: Test SSH and host context
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.PROD_HOST }}
@@ -53,79 +49,72 @@ jobs:
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           command_timeout: 2m
           script: |
-            echo "=== SSH Connection Test ==="
+            echo "=== SSH preflight ==="
             echo "Docker: $(docker --version 2>/dev/null || echo not installed)"
             echo "Disk: $(df -h / | tail -1)"
             docker ps -a --format 'table {{.Names}}\t{{.Status}}' | head -20
-            echo "=== Test completed ==="
+            echo "=== Preflight OK ==="
 
-  test:
-    needs: validate
+  build:
+    needs: preflight
     runs-on: ubuntu-latest
+    outputs:
+      docker_tag: ${{ steps.meta.outputs.TAG }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
 
-      - name: Restore
-        run: dotnet restore
-
-      - name: Build
-        run: dotnet build --configuration Release --no-restore
-
-      - name: Test
+      - name: Restore / build / test (host)
         run: |
+          dotnet restore
+          dotnet build --configuration Release --no-restore
           if [ -n "$(find . -name '*.Tests.csproj' -type f | head -1)" ]; then
             dotnet test --configuration Release --no-build --verbosity normal
           else
-            echo "No *Tests.csproj found, skipping"
+            echo "No *Tests.csproj found, skipping tests"
           fi
-        continue-on-error: true
 
-  build:
-    needs: [validate, test]
-    runs-on: ubuntu-latest
-    outputs:
-      docker_tag: ${{ steps.determine_tag.outputs.TAG }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Docker tag
-        id: determine_tag
+      - name: Docker image tag
+        id: meta
         run: |
-          TAG="$(git tag --points-at HEAD 2>/dev/null | head -1)"
-          if [ -z "$TAG" ]; then TAG="$(date +'%Y.%m.%d-%H%M')-${GITHUB_SHA::8}"; fi
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="$(date -u +'%Y.%m.%d-%H%M')-${GITHUB_SHA::8}"
+          fi
           echo "TAG=$TAG" >> "$GITHUB_OUTPUT"
           echo "Using tag: $TAG"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image
-        run: |
-          docker buildx create --use 2>/dev/null || true
-          docker buildx build \
-            -f "$DOCKERFILE_PATH" \
-            -t "$IMAGE_NAME:${{ steps.determine_tag.outputs.TAG }}" \
-            -t "$IMAGE_NAME:latest" \
-            --platform linux/amd64 \
-            --load \
-            .
-        env:
-          DOCKERFILE_PATH: ${{ env.DOCKERFILE_PATH }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+      - name: Build image (local load + GHA layer cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE_PATH }}
+          push: false
+          load: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.TAG }}
+            ${{ env.IMAGE_NAME }}:latest
+          platforms: linux/amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      - name: Save image
+      - name: Save image tarball
         run: docker save ${{ env.IMAGE_NAME }}:latest | gzip > ${{ env.IMAGE_NAME }}.tar.gz
 
       - name: Upload artifact
@@ -135,35 +124,27 @@ jobs:
           path: ${{ env.IMAGE_NAME }}.tar.gz
           retention-days: 1
 
+      - name: Job summary
+        run: |
+          {
+            echo "## API build"
+            echo "- Tag: **${{ steps.meta.outputs.TAG }}**"
+            echo "- Commit: \`${GITHUB_SHA::8}\`"
+            echo "- Image archive: \`${{ env.IMAGE_NAME }}.tar.gz\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
   deploy:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
       - name: Download image
         uses: actions/download-artifact@v4
         with:
           name: docker-image
           path: .
 
-      - name: Verify Dockerfile
-        run: test -f Dockerfile && echo "OK Dockerfile"
-
       - name: Verify image archive
         run: ls -lh ${{ env.IMAGE_NAME }}.tar.gz && test -f ${{ env.IMAGE_NAME }}.tar.gz
-
-      - name: Prepare server directories
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USER }}
-          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-          port: ${{ secrets.PROD_SSH_PORT }}
-          command_timeout: 2m
-          script: |
-            mkdir -p ${{ env.DEPLOY_DIR }}/uploads ${{ env.DEPLOY_DIR }}/logs ${{ env.DEPLOY_DIR }}/wwwroot/uploads
-            chmod 777 ${{ env.DEPLOY_DIR }}/uploads 2>/dev/null || true
 
       - name: Copy image to server
         uses: appleboy/scp-action@v0.1.7
@@ -176,20 +157,31 @@ jobs:
           target: "/tmp"
           overwrite: true
 
-      - name: Write .env on server
+      - name: Prepare server, write .env, run container
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           port: ${{ secrets.PROD_SSH_PORT }}
-          command_timeout: 2m
+          command_timeout: 30m
           script: |
             set -euo pipefail
-            umask 077
+            IMAGE_NAME="${{ env.IMAGE_NAME }}"
+            DEPLOY_DIR="${{ env.DEPLOY_DIR }}"
+            HOST_PORT="${{ env.HOST_PORT }}"
+            CONTAINER_PORT="${{ env.CONTAINER_PORT }}"
             CONN='${{ secrets.DB_CONNECTION_STRING }}'
             if [ -z "$CONN" ]; then CONN='${{ secrets.APP_CONNECTION_STRING }}'; fi
-            cat > ${{ env.DEPLOY_DIR }}/.env <<EOF
+            if echo "$CONN" | grep -qiE '(^|;)(server|Server)=mysql(;|$)'; then
+              echo "WARN: Server=mysql из контейнера docker run часто недоступен — используйте host.docker.internal или IP БД."
+            fi
+            echo "=== Prepare directories ==="
+            mkdir -p "$DEPLOY_DIR/uploads" "$DEPLOY_DIR/logs" "$DEPLOY_DIR/wwwroot/uploads"
+            chmod 777 "$DEPLOY_DIR/uploads" 2>/dev/null || true
+            echo "=== Write .env ==="
+            umask 077
+            cat > "$DEPLOY_DIR/.env" <<EOF
             ConnectionStrings__DefaultConnection=$CONN
             Jwt__Key=${{ secrets.JWT_KEY }}
             Jwt__Issuer=BebochkaApi
@@ -201,33 +193,20 @@ jobs:
             TelegramBot__Token=${{ secrets.TELEGRAM_BOT_TOKEN }}
             TelegramBot__ChannelId=${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}
             EOF
-            chmod 600 ${{ env.DEPLOY_DIR }}/.env
-            test -f ${{ env.DEPLOY_DIR }}/.env && echo "OK .env"
-
-      - name: Load image and run container
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USER }}
-          key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-          port: ${{ secrets.PROD_SSH_PORT }}
-          command_timeout: 30m
-          envs: IMAGE_NAME,DEPLOY_DIR
-          script: |
-            set -euo pipefail
-            CONN='${{ secrets.DB_CONNECTION_STRING }}'
-            if [ -z "$CONN" ]; then CONN='${{ secrets.APP_CONNECTION_STRING }}'; fi
-            echo "Loading image..."
+            chmod 600 "$DEPLOY_DIR/.env"
+            test -f "$DEPLOY_DIR/.env" && echo "OK .env"
+            echo "=== Load image and run ==="
             docker load < /tmp/$IMAGE_NAME.tar.gz
             rm -f /tmp/$IMAGE_NAME.tar.gz
             docker stop $IMAGE_NAME 2>/dev/null || true
             docker rm -f $IMAGE_NAME 2>/dev/null || true
-            mkdir -p $DEPLOY_DIR/wwwroot/uploads
-            chmod -R 777 $DEPLOY_DIR/wwwroot/uploads 2>/dev/null || true
+            mkdir -p "$DEPLOY_DIR/wwwroot/uploads"
+            chmod -R 777 "$DEPLOY_DIR/wwwroot/uploads" 2>/dev/null || true
             docker run -d \
               --name $IMAGE_NAME \
               --restart unless-stopped \
-              -p ${{ env.HOST_PORT }}:${{ env.CONTAINER_PORT }} \
+              --add-host=host.docker.internal:host-gateway \
+              -p ${HOST_PORT}:${CONTAINER_PORT} \
               -v $DEPLOY_DIR/wwwroot/uploads:/app/wwwroot/uploads \
               -e ASPNETCORE_ENVIRONMENT=Production \
               -e ConnectionStrings__DefaultConnection="$CONN" \
@@ -246,12 +225,9 @@ jobs:
             docker logs --tail=30 $IMAGE_NAME
             docker image prune -f
             echo "=== Deploy finished ==="
-        env:
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
-          DEPLOY_DIR: ${{ env.DEPLOY_DIR }}
 
   post-deploy-test:
-    needs: [deploy, test-connection]
+    needs: [deploy, preflight]
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployment
@@ -267,5 +243,12 @@ jobs:
             docker ps -a | grep ${{ env.IMAGE_NAME }} || true
             docker logs --tail 40 ${{ env.IMAGE_NAME }} || true
             sleep 3
-            curl -sS -f --max-time 15 -X GET "http://127.0.0.1:${{ env.HOST_PORT }}/api/products" | head -c 200 && echo " ... (truncated)" || echo "WARN: GET /api/products failed (проверьте MySQL и строку подключения)"
+            CODE=$(curl -sS -o /tmp/api_body.txt -w "%{http_code}" --max-time 45 -X GET "http://127.0.0.1:${{ env.HOST_PORT }}/api/products" || echo "000")
+            echo "GET /api/products HTTP $CODE"
+            if [ "$CODE" = "200" ]; then head -c 200 /tmp/api_body.txt && echo " ... (truncated)"; else echo "WARN: ожидался 200 — проверьте БД и DB_CONNECTION_STRING"; fi
             echo "=== Done ==="
+
+      - name: Summary
+        run: |
+          echo "## Post-deploy" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Проверка на сервере: см. лог шага **Verify deployment** (HTTP-код /api/products)." >> "$GITHUB_STEP_SUMMARY"
