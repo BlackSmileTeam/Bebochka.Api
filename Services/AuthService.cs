@@ -208,9 +208,9 @@ public class AuthService : IAuthService
 
     public async Task<(AuthResponseDto? Response, string? ErrorCode)> CompleteVkOAuthAsync(string code, VkOAuthState state, CancellationToken cancellationToken = default)
     {
-        var appId = _configuration["Vk:AppId"];
-        var secureKey = _configuration["Vk:SecureKey"];
-        var redirectUri = _configuration["Vk:RedirectUri"];
+        var appId = _configuration["Vk:AppId"]?.Trim();
+        var secureKey = _configuration["Vk:SecureKey"]?.Trim();
+        var redirectUri = _configuration["Vk:RedirectUri"]?.Trim().TrimEnd('/');
         if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(secureKey) || string.IsNullOrEmpty(redirectUri))
             return (null, "config");
 

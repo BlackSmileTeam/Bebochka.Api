@@ -136,8 +136,8 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public IActionResult VkStart([FromQuery] string? returnUrl, [FromQuery] string? sessionId, [FromQuery] bool acceptPersonalDataProcessing = false)
     {
-        var appId = _configuration["Vk:AppId"];
-        var redirectUri = _configuration["Vk:RedirectUri"];
+        var appId = _configuration["Vk:AppId"]?.Trim();
+        var redirectUri = _configuration["Vk:RedirectUri"]?.Trim().TrimEnd('/');
         var frontend = ResolveFrontendBaseUrl();
         var safeReturn = SafeReturnPath(returnUrl);
 
