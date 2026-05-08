@@ -11,7 +11,13 @@ public interface IAuthService
     Task<UserDto?> ValidateTokenAsync(string token);
     Task<AuthResponseDto?> RegisterAsync(RegisterDto dto);
     Task<AuthResponseDto?> LoginWithGoogleAsync(GoogleLoginDto dto);
-    Task<(AuthResponseDto? Response, string? ErrorCode)> CompleteVkOAuthAsync(string code, VkOAuthState state, CancellationToken cancellationToken = default);
+    /// <summary>Завершение входа VK ID (OAuth 2.1 + PKCE, id.vk.ru).</summary>
+    Task<(AuthResponseDto? Response, string? ErrorCode)> CompleteVkOAuthAsync(
+        string code,
+        string? deviceId,
+        string oauthState,
+        VkIdOAuthPending pending,
+        CancellationToken cancellationToken = default);
     Task<bool> SendPhoneLoginCodeAsync(PhoneSendCodeDto dto);
     Task<AuthResponseDto?> VerifyPhoneLoginAsync(PhoneVerifyDto dto);
     Task MergeGuestCartAsync(int userId, string sessionId);

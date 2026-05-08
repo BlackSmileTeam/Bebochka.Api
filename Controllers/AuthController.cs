@@ -3,9 +3,11 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.WebUtilities;
+using Microsoft.Extensions.Caching.Memory;
 using Bebochka.Api.Exceptions;
 using Bebochka.Api.Models.DTOs;
 using Bebochka.Api.Services;
+using Bebochka.Api.Utilities;
 
 namespace Bebochka.Api.Controllers;
 
@@ -17,13 +19,17 @@ namespace Bebochka.Api.Controllers;
 [Produces("application/json")]
 public class AuthController : ControllerBase
 {
+    private const string VkIdOAuthCachePrefix = "vkid_oauth_v1:";
+
     private readonly IAuthService _authService;
     private readonly IConfiguration _configuration;
+    private readonly IMemoryCache _memoryCache;
 
-    public AuthController(IAuthService authService, IConfiguration configuration)
+    public AuthController(IAuthService authService, IConfiguration configuration, IMemoryCache memoryCache)
     {
         _authService = authService;
         _configuration = configuration;
+        _memoryCache = memoryCache;
     }
 
     private static string SafeReturnPath(string? raw)
@@ -130,7 +136,8 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Начало входа через VK: редирект на oauth.vk.com (нужны Vk:AppId, Vk:SecureKey, Vk:RedirectUri, App:FrontendPublicUrl).
+    /// Начало входа через VK ID: PKCE + редирект на id.vk.ru/authorize (приложения из кабинета vk.com/apps / VK ID).
+    /// Нужны Vk:AppId, Vk:RedirectUri (доверенный URL в настройках приложения).
     /// </summary>
     [HttpGet("vk/start")]
     [AllowAnonymous]
@@ -144,30 +151,42 @@ public class AuthController : ControllerBase
         if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(redirectUri))
             return Redirect($"{frontend.TrimEnd('/')}/account?returnUrl={Uri.EscapeDataString(safeReturn)}&vkError=config");
 
-        var stateObj = new VkOAuthState
+        var codeVerifier = VkPkceHelper.CreateCodeVerifier();
+        var codeChallenge = VkPkceHelper.CreateCodeChallenge(codeVerifier);
+        var oauthState = VkPkceHelper.CreateOAuthState();
+
+        var pending = new VkIdOAuthPending
         {
+            CodeVerifier = codeVerifier,
             ReturnUrl = safeReturn,
             SessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId.Trim(),
             AcceptPersonalDataProcessing = acceptPersonalDataProcessing
         };
-        var json = JsonSerializer.Serialize(stateObj);
-        var stateB64 = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(json));
 
+        _memoryCache.Set(VkIdOAuthCachePrefix + oauthState, pending, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(15)
+        });
+
+        const string scope = "vkid.personal_info email";
         var vkUrl =
-            "https://oauth.vk.com/authorize?client_id=" + Uri.EscapeDataString(appId)
-            + "&display=page&redirect_uri=" + Uri.EscapeDataString(redirectUri)
-            + "&scope=" + Uri.EscapeDataString("email")
-            + "&response_type=code&v=5.131&state=" + Uri.EscapeDataString(stateB64);
+            "https://id.vk.ru/authorize?response_type=code"
+            + "&client_id=" + Uri.EscapeDataString(appId)
+            + "&redirect_uri=" + Uri.EscapeDataString(redirectUri)
+            + "&state=" + Uri.EscapeDataString(oauthState)
+            + "&code_challenge=" + Uri.EscapeDataString(codeChallenge)
+            + "&code_challenge_method=S256"
+            + "&scope=" + Uri.EscapeDataString(scope);
 
         return Redirect(vkUrl);
     }
 
     /// <summary>
-    /// Callback VK OAuth: обмен code, выпуск JWT, редирект на фронт с данными во фрагменте #bebochkaAuth=...
+    /// Callback VK ID: обмен code (PKCE), user_info, выпуск JWT, редирект на фронт с #bebochkaAuth=...
     /// </summary>
     [HttpGet("vk/callback")]
     [AllowAnonymous]
-    public async Task<IActionResult> VkCallback([FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? error, CancellationToken cancellationToken)
+    public async Task<IActionResult> VkCallback([FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? device_id, [FromQuery] string? error, CancellationToken cancellationToken)
     {
         var frontend = ResolveFrontendBaseUrl();
 
@@ -177,19 +196,16 @@ public class AuthController : ControllerBase
         if (string.IsNullOrEmpty(state) || string.IsNullOrEmpty(code))
             return Redirect($"{frontend.TrimEnd('/')}/account?vkError=incomplete");
 
-        VkOAuthState stateObj;
-        try
-        {
-            var bytes = WebEncoders.Base64UrlDecode(state);
-            stateObj = JsonSerializer.Deserialize<VkOAuthState>(bytes) ?? new VkOAuthState();
-        }
-        catch
-        {
+        if (!_memoryCache.TryGetValue(VkIdOAuthCachePrefix + state, out VkIdOAuthPending? pending) || pending == null)
             return Redirect($"{frontend.TrimEnd('/')}/account?vkError=state");
-        }
 
-        var safeReturn = SafeReturnPath(stateObj.ReturnUrl);
-        var (auth, err) = await _authService.CompleteVkOAuthAsync(code, stateObj, cancellationToken);
+        _memoryCache.Remove(VkIdOAuthCachePrefix + state);
+
+        if (string.IsNullOrWhiteSpace(device_id))
+            return Redirect($"{frontend.TrimEnd('/')}/account?vkError=incomplete");
+
+        var safeReturn = SafeReturnPath(pending.ReturnUrl);
+        var (auth, err) = await _authService.CompleteVkOAuthAsync(code, device_id, state, pending, cancellationToken);
         if (auth == null)
         {
             var errCode = err switch
@@ -197,6 +213,8 @@ public class AuthController : ControllerBase
                 "consent" => "consent",
                 "email_conflict" => "email_conflict",
                 "config" => "config",
+                "token_exchange" => "failed",
+                "user_info" => "failed",
                 _ => "failed"
             };
             return Redirect($"{frontend.TrimEnd('/')}/account?returnUrl={Uri.EscapeDataString(safeReturn)}&vkError={errCode}");

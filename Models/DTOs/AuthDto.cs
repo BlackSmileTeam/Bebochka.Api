@@ -78,7 +78,18 @@ public class GoogleLoginDto
 }
 
 /// <summary>
-/// Состояние OAuth VK (кодируется в параметре state при редиректе на oauth.vk.com).
+/// Данные сессии VK ID OAuth (хранятся на сервере; в URL уходит только случайный state).
+/// </summary>
+public class VkIdOAuthPending
+{
+    public string CodeVerifier { get; set; } = "";
+    public string ReturnUrl { get; set; } = "/";
+    public string? SessionId { get; set; }
+    public bool AcceptPersonalDataProcessing { get; set; }
+}
+
+/// <summary>
+/// Состояние OAuth VK (после извлечения из <see cref="VkIdOAuthPending"/>).
 /// </summary>
 public class VkOAuthState
 {

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -206,36 +207,78 @@ public class AuthService : IAuthService
         return BuildAuthResponse(user);
     }
 
-    public async Task<(AuthResponseDto? Response, string? ErrorCode)> CompleteVkOAuthAsync(string code, VkOAuthState state, CancellationToken cancellationToken = default)
+    public async Task<(AuthResponseDto? Response, string? ErrorCode)> CompleteVkOAuthAsync(
+        string code,
+        string? deviceId,
+        string oauthState,
+        VkIdOAuthPending pending,
+        CancellationToken cancellationToken = default)
     {
         var appId = _configuration["Vk:AppId"]?.Trim();
-        var secureKey = _configuration["Vk:SecureKey"]?.Trim();
         var redirectUri = _configuration["Vk:RedirectUri"]?.Trim().TrimEnd('/');
-        if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(secureKey) || string.IsNullOrEmpty(redirectUri))
+        if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(redirectUri))
             return (null, "config");
 
-        if (string.IsNullOrWhiteSpace(code))
+        if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(pending.CodeVerifier))
             return (null, "token_exchange");
+
+        if (string.IsNullOrWhiteSpace(deviceId))
+            return (null, "token_exchange");
+
+        var state = new VkOAuthState
+        {
+            ReturnUrl = pending.ReturnUrl,
+            SessionId = pending.SessionId,
+            AcceptPersonalDataProcessing = pending.AcceptPersonalDataProcessing
+        };
 
         var client = _httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(30);
 
-        var tokenUrl =
-            "https://oauth.vk.com/access_token?client_id=" + Uri.EscapeDataString(appId)
-            + "&client_secret=" + Uri.EscapeDataString(secureKey)
-            + "&redirect_uri=" + Uri.EscapeDataString(redirectUri)
-            + "&code=" + Uri.EscapeDataString(code.Trim());
+        var tokenForm = new Dictionary<string, string>
+        {
+            ["grant_type"] = "authorization_code",
+            ["code_verifier"] = pending.CodeVerifier,
+            ["redirect_uri"] = redirectUri,
+            ["code"] = code.Trim(),
+            ["client_id"] = appId,
+            ["device_id"] = deviceId.Trim(),
+            ["state"] = oauthState
+        };
+        using var tokenContent = new FormUrlEncodedContent(tokenForm);
 
-        using var tokenResp = await client.GetAsync(tokenUrl, cancellationToken);
+        using var tokenResp = await client.PostAsync("https://id.vk.ru/oauth2/auth", tokenContent, cancellationToken);
         var tokenJson = await tokenResp.Content.ReadAsStringAsync(cancellationToken);
 
         using var tokenDoc = JsonDocument.Parse(tokenJson);
         var root = tokenDoc.RootElement;
-        if (root.TryGetProperty("error", out _))
+        if (TryGetJsonPropertyInsensitive(root, "error", out _))
             return (null, "token_exchange");
 
-        if (!root.TryGetProperty("user_id", out var userIdEl) || !root.TryGetProperty("access_token", out var accessEl))
+        if (!TryGetJsonPropertyInsensitive(root, "access_token", out var accessEl))
             return (null, "token_exchange");
+
+        var accessToken = accessEl.GetString() ?? "";
+
+        var userInfoForm = new Dictionary<string, string>
+        {
+            ["client_id"] = appId,
+            ["access_token"] = accessToken
+        };
+        using var userInfoContent = new FormUrlEncodedContent(userInfoForm);
+
+        using var infoResp = await client.PostAsync("https://id.vk.ru/oauth2/user_info", userInfoContent, cancellationToken);
+        var infoJson = await infoResp.Content.ReadAsStringAsync(cancellationToken);
+        using var infoDoc = JsonDocument.Parse(infoJson);
+        var infoRoot = infoDoc.RootElement;
+        if (TryGetJsonPropertyInsensitive(infoRoot, "error", out _))
+            return (null, "user_info");
+
+        if (!TryGetJsonPropertyInsensitive(infoRoot, "user", out var userEl))
+            return (null, "user_info");
+
+        if (!TryGetJsonPropertyInsensitive(userEl, "user_id", out var userIdEl))
+            return (null, "user_info");
 
         long vkUserId;
         try
@@ -246,36 +289,19 @@ public class AuthService : IAuthService
         }
         catch
         {
-            return (null, "token_exchange");
+            return (null, "user_info");
         }
 
-        var accessToken = accessEl.GetString() ?? "";
-        var email = root.TryGetProperty("email", out var emEl) && emEl.ValueKind == JsonValueKind.String
-            ? emEl.GetString()
-            : null;
-
-        var infoUrl =
-            "https://api.vk.com/method/users.get?user_ids=" + vkUserId
-            + "&fields=first_name,last_name,nickname&v=5.131&lang=0&access_token="
-            + Uri.EscapeDataString(accessToken);
-
-        using var infoResp = await client.GetAsync(infoUrl, cancellationToken);
-        var infoJson = await infoResp.Content.ReadAsStringAsync(cancellationToken);
-        using var infoDoc = JsonDocument.Parse(infoJson);
-        var infoRoot = infoDoc.RootElement;
-        if (infoRoot.TryGetProperty("error", out _))
-            return (null, "user_info");
+        string? email = null;
+        if (TryGetJsonPropertyInsensitive(userEl, "email", out var emailEl) && emailEl.ValueKind == JsonValueKind.String)
+            email = emailEl.GetString();
 
         string? fullName = null;
-        if (infoRoot.TryGetProperty("response", out var responseArr) && responseArr.ValueKind == JsonValueKind.Array && responseArr.GetArrayLength() > 0)
-        {
-            var u = responseArr[0];
-            var fn = u.TryGetProperty("first_name", out var f) ? f.GetString() : "";
-            var ln = u.TryGetProperty("last_name", out var l) ? l.GetString() : "";
-            fullName = string.Join(' ', new[] { fn, ln }.Where(s => !string.IsNullOrEmpty(s)));
-            if (string.IsNullOrWhiteSpace(fullName))
-                fullName = null;
-        }
+        var fn = TryGetJsonPropertyInsensitive(userEl, "first_name", out var fnEl) ? fnEl.GetString() : "";
+        var ln = TryGetJsonPropertyInsensitive(userEl, "last_name", out var lnEl) ? lnEl.GetString() : "";
+        fullName = string.Join(' ', new[] { fn, ln }.Where(s => !string.IsNullOrEmpty(s)));
+        if (string.IsNullOrWhiteSpace(fullName))
+            fullName = null;
 
         var user = await _context.Users.FirstOrDefaultAsync(x => x.VkUserId == vkUserId, cancellationToken);
         if (user == null)
@@ -512,5 +538,20 @@ public class AuthService : IAuthService
         );
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private static bool TryGetJsonPropertyInsensitive(JsonElement el, string name, out JsonElement value)
+    {
+        foreach (var p in el.EnumerateObject())
+        {
+            if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = p.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 }
