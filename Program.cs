@@ -236,6 +236,26 @@ var app = builder.Build();
 // CORS must be very early in the pipeline, before UseRouting
 app.UseCors("AllowReactApp");
 
+// Маршрут /account — это страница React; на хосте API (например :55501) её нет → 404. Редирект на публичный фронт (VK callback, ошибочная ссылка).
+app.Use(async (context, next) =>
+{
+    if (!HttpMethods.IsGet(context.Request.Method))
+    {
+        await next(context);
+        return;
+    }
+    var path = context.Request.Path.Value ?? "";
+    if (!path.Equals("/account", StringComparison.OrdinalIgnoreCase))
+    {
+        await next(context);
+        return;
+    }
+    var configured = app.Configuration["App:FrontendPublicUrl"]?.Trim().TrimEnd('/');
+    var frontend = string.IsNullOrEmpty(configured) ? "https://bebochka.ru" : configured;
+    var qs = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : "";
+    context.Response.Redirect(frontend + path + qs, permanent: false);
+});
+
 // Логирование времени выполнения запросов (для создания/обновления карточек — полное время, включая загрузку тела)
 app.Use(async (context, next) =>
 {
