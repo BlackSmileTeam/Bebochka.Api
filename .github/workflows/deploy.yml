@@ -251,7 +251,7 @@ jobs:
           DEPLOY_DIR: ${{ env.DEPLOY_DIR }}
 
   post-deploy-test:
-    needs: deploy
+    needs: [deploy, test-connection]
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployment
