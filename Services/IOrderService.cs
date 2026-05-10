@@ -102,5 +102,10 @@ public interface IOrderService
     /// Список отзывов клиентов по заказам для администратора.
     /// </summary>
     Task<List<OrderCustomerReviewAdminDto>> GetCustomerReviewsAsync();
+
+    /// <summary>
+    /// Ручное добавление отзыва администратором (новый или к существующему заказу по номеру).
+    /// </summary>
+    Task<OrderCustomerReviewAdminDto> CreateAdminManualReviewAsync(CreateAdminManualReviewDto dto, int adminUserId);
 }
 

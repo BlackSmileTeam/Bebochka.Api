@@ -220,6 +220,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Rating);
             entity.Property(e => e.CreatedAtUtc);
             entity.Property(e => e.Comment).HasColumnType("TEXT");
+            entity.Property(e => e.ReviewImagesJson).HasColumnType("TEXT");
             entity.HasIndex(e => e.OrderId).IsUnique();
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.CreatedAtUtc);

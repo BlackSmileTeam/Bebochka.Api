@@ -75,6 +75,25 @@ public class OrderCustomerReviewAdminDto
     public int? Rating { get; set; }
     public string? Comment { get; set; }
     public DateTime CreatedAtUtc { get; set; }
+    public List<string> ImageUrls { get; set; } = new();
+}
+
+/// <summary>
+/// Ручное создание отзыва администратором (опционально привязка к заказу по номеру).
+/// </summary>
+public class CreateAdminManualReviewDto
+{
+    public string? OrderNumber { get; set; }
+    public string? CustomerName { get; set; }
+    public string? CustomerPhone { get; set; }
+    public int Rating { get; set; }
+    public string Comment { get; set; } = string.Empty;
+    public List<string>? ImagesBase64 { get; set; }
+
+    /// <summary>
+    /// Дата/время отзыва (ISO 8601). Если не задано — используется текущий UTC.
+    /// </summary>
+    public DateTime? CreatedAtUtc { get; set; }
 }
 
 /// <summary>

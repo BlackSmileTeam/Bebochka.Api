@@ -20,4 +20,7 @@ public class OrderCustomerReview
     public string? Comment { get; set; }
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>JSON-массив путей к фото отзыва (как /uploads/...).</summary>
+    public string? ReviewImagesJson { get; set; }
 }

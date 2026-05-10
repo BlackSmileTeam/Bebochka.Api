@@ -1,6 +1,9 @@
 using System.Security.Claims;
+using System.Text.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Bebochka.Api.Data;
+using Bebochka.Api.Helpers;
 using Bebochka.Api.Models;
 using Bebochka.Api.Models.DTOs;
 
@@ -23,13 +26,20 @@ public class OrderService : IOrderService
     private readonly IEmailService _emailService;
     private readonly ITelegramNotificationService _telegramService;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IWebHostEnvironment _environment;
 
-    public OrderService(AppDbContext context, IEmailService emailService, ITelegramNotificationService telegramService, IHttpContextAccessor httpContextAccessor)
+    public OrderService(
+        AppDbContext context,
+        IEmailService emailService,
+        ITelegramNotificationService telegramService,
+        IHttpContextAccessor httpContextAccessor,
+        IWebHostEnvironment environment)
     {
         _context = context;
         _emailService = emailService;
         _telegramService = telegramService;
         _httpContextAccessor = httpContextAccessor;
+        _environment = environment;
     }
 
     public async Task<OrderDto> CreateOrderAsync(CreateOrderDto dto)
@@ -755,7 +765,79 @@ public class OrderService : IOrderService
             .OrderByDescending(r => r.CreatedAtUtc)
             .ToListAsync();
 
-        return reviews.Select(r => new OrderCustomerReviewAdminDto
+        return reviews.Select(MapOrderCustomerReviewToAdminDto).ToList();
+    }
+
+    public async Task<OrderCustomerReviewAdminDto> CreateAdminManualReviewAsync(CreateAdminManualReviewDto dto, int adminUserId)
+    {
+        if (dto.Rating < 1 || dto.Rating > 5)
+            throw new InvalidOperationException("Оценка должна быть от 1 до 5");
+
+        var trimmedComment = string.IsNullOrWhiteSpace(dto.Comment) ? null : dto.Comment.Trim();
+        if (trimmedComment != null && trimmedComment.Length > 4000)
+            trimmedComment = trimmedComment[..4000];
+
+        var adminExists = await _context.Users.AnyAsync(u => u.Id == adminUserId);
+        if (!adminExists)
+            throw new InvalidOperationException("Пользователь администратора не найден");
+
+        Order order;
+        var orderNo = dto.OrderNumber?.Trim();
+        if (!string.IsNullOrEmpty(orderNo))
+        {
+            var found = await _context.Orders
+                .Include(o => o.CustomerReview)
+                .FirstOrDefaultAsync(o => o.OrderNumber == orderNo);
+            if (found == null)
+                throw new InvalidOperationException("Заказ с таким номером не найден.");
+            if (found.CustomerReview != null)
+                throw new InvalidOperationException("Отзыв по этому заказу уже существует.");
+            order = found;
+        }
+        else
+        {
+            var suffix = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
+            order = new Order
+            {
+                OrderNumber = $"ADM-{DateTime.UtcNow:yyyyMMdd}-{suffix}",
+                CustomerName = string.IsNullOrWhiteSpace(dto.CustomerName) ? "Клиент" : dto.CustomerName.Trim(),
+                CustomerPhone = string.IsNullOrWhiteSpace(dto.CustomerPhone) ? "—" : dto.CustomerPhone.Trim(),
+                Status = StatusReceived,
+                TotalAmount = 0,
+                DiscountType = "None",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _context.Orders.Add(order);
+            await _context.SaveChangesAsync();
+        }
+
+        var imagePaths = await SaveReviewImagesFromBase64Async(dto.ImagesBase64);
+        var createdAt = dto.CreatedAtUtc ?? DateTime.UtcNow;
+
+        var review = new OrderCustomerReview
+        {
+            OrderId = order.Id,
+            UserId = adminUserId,
+            Rating = dto.Rating,
+            Comment = trimmedComment,
+            CreatedAtUtc = createdAt,
+            ReviewImagesJson = imagePaths.Count > 0 ? JsonSerializer.Serialize(imagePaths) : null
+        };
+        _context.OrderCustomerReviews.Add(review);
+        await _context.SaveChangesAsync();
+
+        var saved = await _context.OrderCustomerReviews
+            .Include(r => r.Order)
+            .Include(r => r.User)
+            .FirstAsync(r => r.Id == review.Id);
+
+        return MapOrderCustomerReviewToAdminDto(saved);
+    }
+
+    private static OrderCustomerReviewAdminDto MapOrderCustomerReviewToAdminDto(OrderCustomerReview r)
+    {
+        return new OrderCustomerReviewAdminDto
         {
             Id = r.Id,
             OrderId = r.OrderId,
@@ -764,12 +846,65 @@ public class OrderService : IOrderService
             CustomerName = r.User?.FullName
                 ?? r.User?.Username
                 ?? r.Order?.CustomerName
-                ?? $"Пользователь #{r.UserId}",
+                ?? (r.UserId.HasValue ? $"Пользователь #{r.UserId}" : "—"),
             CustomerPhone = r.Order?.CustomerPhone ?? r.User?.Phone,
             Rating = r.Rating,
             Comment = r.Comment,
-            CreatedAtUtc = r.CreatedAtUtc
-        }).ToList();
+            CreatedAtUtc = r.CreatedAtUtc,
+            ImageUrls = DeserializeReviewImagePaths(r.ReviewImagesJson)
+        };
+    }
+
+    private static List<string> DeserializeReviewImagePaths(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new List<string>();
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
+
+    private async Task<List<string>> SaveReviewImagesFromBase64Async(List<string>? images)
+    {
+        var paths = new List<string>();
+        if (images == null || images.Count == 0) return paths;
+
+        var uploadsFolder = Path.Combine(AppPaths.WwwRoot(_environment), "uploads");
+        if (!Directory.Exists(uploadsFolder))
+            Directory.CreateDirectory(uploadsFolder);
+
+        foreach (var base64Image in images)
+        {
+            if (string.IsNullOrWhiteSpace(base64Image)) continue;
+            try
+            {
+                var base64Data = base64Image.Contains(',')
+                    ? base64Image.Split(',')[1]
+                    : base64Image;
+                var imageBytes = Convert.FromBase64String(base64Data);
+                var extension = ".jpg";
+                if (imageBytes.Length > 2)
+                {
+                    if (imageBytes[0] == 0x89 && imageBytes[1] == 0x50) extension = ".png";
+                    else if (imageBytes[0] == 0x47 && imageBytes[1] == 0x49) extension = ".gif";
+                    else if (imageBytes[0] == 0x52 && imageBytes[1] == 0x49) extension = ".webp";
+                }
+
+                var fileName = $"{Guid.NewGuid()}{extension}";
+                await File.WriteAllBytesAsync(Path.Combine(uploadsFolder, fileName), imageBytes);
+                paths.Add($"/uploads/{fileName}");
+            }
+            catch
+            {
+                // пропускаем битое изображение
+            }
+        }
+
+        return paths;
     }
 
     public async Task ApplyDiscountToOrdersAsync(IEnumerable<int> orderIds, string discountType, int? fixedPercent, int? condition1, int? condition3, int? condition5Plus)

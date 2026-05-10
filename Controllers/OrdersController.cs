@@ -149,6 +149,32 @@ public class OrdersController : ControllerBase
     }
 
     /// <summary>
+    /// Ручное добавление отзыва администратором (дата и фото опциональны).
+    /// </summary>
+    [HttpPost("reviews/admin")]
+    [Authorize(Roles = "Admin")]
+    [ProducesResponseType(typeof(OrderCustomerReviewAdminDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<OrderCustomerReviewAdminDto>> CreateAdminManualReview([FromBody] CreateAdminManualReviewDto? dto)
+    {
+        if (dto == null)
+            return BadRequest(new { message = "Тело запроса обязательно" });
+        var userIdClaim = User.FindFirst("UserId")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(userIdClaim, out var adminUserId))
+            return Unauthorized();
+        try
+        {
+            var created = await _orderService.CreateAdminManualReviewAsync(dto, adminUserId);
+            return Ok(created);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    /// <summary>
     /// Gets all orders (for bot, no auth required)
     /// </summary>
     [HttpGet("all")]
