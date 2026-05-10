@@ -8,6 +8,7 @@ using Pomelo.EntityFrameworkCore.MySql.Infrastructure;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http;
+using Bebochka.Api.Helpers;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -287,12 +288,13 @@ app.UseSwaggerUI(c =>
     c.DisplayRequestDuration();
 });
 
-// Serve static files (for uploaded images)
-var wwwrootPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+// Serve static files (for uploaded images) — тот же путь, что и при записи в ProductsController (AppPaths.WwwRoot).
+var wwwrootPath = AppPaths.WwwRoot(app.Environment);
 if (!Directory.Exists(wwwrootPath))
 {
     Directory.CreateDirectory(wwwrootPath);
 }
+Console.WriteLine($"[Startup] Static files / uploads directory: {wwwrootPath}");
 
 app.UseStaticFiles(new StaticFileOptions
 {

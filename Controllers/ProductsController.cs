@@ -161,7 +161,7 @@ public class ProductsController : ControllerBase
             // Обрабатываем base64 изображения
             if (dto.Images != null && dto.Images.Any())
             {
-                var uploadsFolder = Path.Combine(_environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
+                var uploadsFolder = Path.Combine(AppPaths.WwwRoot(_environment), "uploads");
                 Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Uploads folder path: {uploadsFolder}");
                 
                 try
@@ -357,7 +357,7 @@ public class ProductsController : ControllerBase
             // Add new uploaded images (base64)
             if (dto.Images != null && dto.Images.Any())
             {
-                var uploadsFolder = Path.Combine(_environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot"), "uploads");
+                var uploadsFolder = Path.Combine(AppPaths.WwwRoot(_environment), "uploads");
                 if (!Directory.Exists(uploadsFolder))
                 {
                     Directory.CreateDirectory(uploadsFolder);
