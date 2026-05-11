@@ -1,5 +1,6 @@
--- Отзыв без заказа: OrderId NULL + ручные поля имени/телефона.
--- Выполните на БД приложения после обновления API.
+-- Отзыв без заказа: OrderId NULL + ручные поля имени/телефона + ReviewImagesJson (если нет).
+-- ОБЯЗАТЕЛЬНО выполните на продакшен-БД после деплоя API, иначе GET /api/orders/reviews → 500
+--   (Unknown column 'ManualCustomerName' / 'ReviewImagesJson').
 
 SET @db := DATABASE();
 
@@ -45,3 +46,15 @@ SET @addFk := IF(@fkExists = 0,
 PREPARE stmt3 FROM @addFk;
 EXECUTE stmt3;
 DEALLOCATE PREPARE stmt3;
+
+-- Колонка ReviewImagesJson (фото отзыва), если ещё не добавлена
+SET @hasReviewImages := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'ordercustomerreviews' AND COLUMN_NAME = 'ReviewImagesJson'
+);
+SET @sql4 := IF(@hasReviewImages = 0,
+  'ALTER TABLE `ordercustomerreviews` ADD COLUMN `ReviewImagesJson` TEXT NULL',
+  'SELECT ''skip: ReviewImagesJson exists'' AS `msg`');
+PREPARE stmt4 FROM @sql4;
+EXECUTE stmt4;
+DEALLOCATE PREPARE stmt4;
