@@ -2,7 +2,7 @@
 -- ОБЯЗАТЕЛЬНО выполните на продакшен-БД после деплоя API, иначе GET /api/orders/reviews → 500
 --   (Unknown column 'ManualCustomerName' / 'ReviewImagesJson').
 --
--- Срочно только колонки (без смены FK / OrderId): reviews_add_manual_columns_if_missing.sql
+-- Быстрый один скрипт (то же по сути): reviews_add_manual_columns_if_missing.sql
 
 SET @db := DATABASE();
 

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.EntityFrameworkCore;
 using Bebochka.Api.Models.DTOs;
 using Bebochka.Api.Services;
 
@@ -173,6 +174,21 @@ public class OrdersController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (DbUpdateException ex)
+        {
+            var inner = ex.InnerException?.Message ?? ex.Message;
+            if (inner.Contains("cannot be null", StringComparison.OrdinalIgnoreCase) &&
+                inner.Contains("OrderId", StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new
+                {
+                    message = "В таблице ordercustomerreviews колонка OrderId не допускает NULL. Выполните на MySQL скрипт Database/reviews_add_manual_columns_if_missing.sql (репозиторий Bebochka.Api), затем повторите запрос."
+                });
+            }
+
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { message = "Не удалось сохранить отзыв. Проверьте логи и схему БД." });
         }
     }
 
