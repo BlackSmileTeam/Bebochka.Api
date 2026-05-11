@@ -47,8 +47,8 @@ public interface IOrderService
     /// </summary>
     /// <param name="orderId">Order ID</param>
     /// <param name="status">New status</param>
-    /// <returns>True if updated successfully</returns>
-    Task<bool> UpdateOrderStatusAsync(int orderId, string status);
+    /// <returns>Результат: успех или сообщение об ошибке для ответа API.</returns>
+    Task<OrderStatusUpdateOutcome> UpdateOrderStatusAsync(int orderId, string status);
     
     /// <summary>
     /// Gets order statistics
@@ -107,5 +107,8 @@ public interface IOrderService
     /// Ручное добавление отзыва администратором (новый или к существующему заказу по номеру).
     /// </summary>
     Task<OrderCustomerReviewAdminDto> CreateAdminManualReviewAsync(CreateAdminManualReviewDto dto, int adminUserId);
+
+    /// <summary>Удалить отзыв (и файлы фото с диска при наличии).</summary>
+    Task<bool> DeleteCustomerReviewAsync(int reviewId);
 }
 

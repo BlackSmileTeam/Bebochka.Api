@@ -67,7 +67,7 @@ public class MarkOrderReceivedDto
 public class OrderCustomerReviewAdminDto
 {
     public int Id { get; set; }
-    public int OrderId { get; set; }
+    public int? OrderId { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
     public int? UserId { get; set; }
     public string CustomerName { get; set; } = string.Empty;
@@ -91,9 +91,12 @@ public class CreateAdminManualReviewDto
     public List<string>? ImagesBase64 { get; set; }
 
     /// <summary>
-    /// Дата/время отзыва (ISO 8601). Если не задано — используется текущий UTC.
+    /// Дата/время отзыва (ISO 8601). Если не задано — используется текущий UTC или <see cref="CreatedDate"/>.
     /// </summary>
     public DateTime? CreatedAtUtc { get; set; }
+
+    /// <summary>Дата отзыва YYYY-MM-DD (без времени). Имеет приоритет над CreatedAtUtc при задании.</summary>
+    public string? CreatedDate { get; set; }
 }
 
 /// <summary>
@@ -168,4 +171,7 @@ public class ReserveFromTelegramResultDto
     public OrderDto? Order { get; set; }
     public string? Reason { get; set; }
 }
+
+/// <summary>Результат смены статуса заказа (админка / публичный endpoint для бота).</summary>
+public sealed record OrderStatusUpdateOutcome(bool Success, string? Message = null);
 

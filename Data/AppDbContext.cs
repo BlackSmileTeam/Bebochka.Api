@@ -224,9 +224,12 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.OrderId).IsUnique();
             entity.HasIndex(e => e.UserId);
             entity.HasIndex(e => e.CreatedAtUtc);
+            entity.Property(e => e.ManualCustomerName).HasMaxLength(255);
+            entity.Property(e => e.ManualCustomerPhone).HasMaxLength(100);
             entity.HasOne(e => e.Order)
                 .WithOne(o => o.CustomerReview)
                 .HasForeignKey<OrderCustomerReview>(e => e.OrderId)
+                .IsRequired(false)
                 .OnDelete(DeleteBehavior.Cascade);
             entity.HasOne(e => e.User)
                 .WithMany()

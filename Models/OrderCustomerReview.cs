@@ -7,9 +7,15 @@ public class OrderCustomerReview
 {
     public int Id { get; set; }
 
-    public int OrderId { get; set; }
+    /// <summary>Заказ; null — отзыв только с сайта админом без привязки к заказу.</summary>
+    public int? OrderId { get; set; }
 
-    public Order Order { get; set; } = null!;
+    public Order? Order { get; set; }
+
+    /// <summary>Имя/телефон для ручного отзыва без заказа (иначе из заказа/пользователя).</summary>
+    public string? ManualCustomerName { get; set; }
+
+    public string? ManualCustomerPhone { get; set; }
 
     public int? UserId { get; set; }
 

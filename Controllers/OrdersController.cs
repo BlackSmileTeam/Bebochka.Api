@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Bebochka.Api.Models.DTOs;
@@ -143,7 +144,8 @@ public class OrdersController : ControllerBase
             id = r.Id,
             rating = r.Rating,
             comment = r.Comment,
-            createdAtUtc = r.CreatedAtUtc
+            createdAtUtc = r.CreatedAtUtc,
+            imageUrls = r.ImageUrls
         });
         return Ok(payload);
     }
@@ -190,14 +192,37 @@ public class OrdersController : ControllerBase
     }
 
     /// <summary>
-    /// Gets orders by user ID
+    /// Gets orders by user ID (admin only; раньше был открытый endpoint).
     /// </summary>
     [HttpGet("user")]
+    [Authorize(Roles = "Admin")]
     [ProducesResponseType(typeof(List<OrderDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<OrderDto>>> GetUserOrders([FromQuery] int userId)
     {
         var orders = await _orderService.GetUserOrdersAsync(userId);
         return Ok(orders);
+    }
+
+    /// <summary>Заказы пользователя по id (админка).</summary>
+    [HttpGet("by-user/{userId:int}")]
+    [Authorize(Roles = "Admin")]
+    [ProducesResponseType(typeof(List<OrderDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<OrderDto>>> GetOrdersByUserId(int userId)
+    {
+        var orders = await _orderService.GetUserOrdersAsync(userId);
+        return Ok(orders);
+    }
+
+    /// <summary>Удалить отзыв (админ).</summary>
+    [HttpDelete("reviews/{id:int}")]
+    [Authorize(Roles = "Admin")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> DeleteCustomerReview(int id)
+    {
+        var ok = await _orderService.DeleteCustomerReviewAsync(id);
+        if (!ok) return NotFound();
+        return NoContent();
     }
 
     /// <summary>
@@ -270,9 +295,9 @@ public class OrdersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> UpdateOrderStatus(int id, [FromBody] UpdateOrderStatusDto dto)
     {
-        var success = await _orderService.UpdateOrderStatusAsync(id, dto.Status);
-        if (!success)
-            return BadRequest(new { message = "Не удалось обновить статус заказа" });
+        var outcome = await _orderService.UpdateOrderStatusAsync(id, dto?.Status ?? string.Empty);
+        if (!outcome.Success)
+            return BadRequest(new { message = outcome.Message ?? "Не удалось обновить статус заказа" });
 
         return Ok(new { message = "Статус обновлен" });
     }
@@ -285,9 +310,9 @@ public class OrdersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> UpdateOrderStatusPublic(int id, [FromBody] UpdateOrderStatusDto dto)
     {
-        var success = await _orderService.UpdateOrderStatusAsync(id, dto.Status);
-        if (!success)
-            return BadRequest(new { message = "Не удалось обновить статус заказа" });
+        var outcome = await _orderService.UpdateOrderStatusAsync(id, dto?.Status ?? string.Empty);
+        if (!outcome.Success)
+            return BadRequest(new { message = outcome.Message ?? "Не удалось обновить статус заказа" });
 
         return Ok(new { message = "Статус обновлен" });
     }
@@ -414,7 +439,8 @@ public class CancelOrderDto
 
 public class UpdateOrderStatusDto
 {
-    public string Status { get; set; } = string.Empty;
+    [JsonPropertyName("status")]
+    public string? Status { get; set; }
 }
 
 public class SetOrderItemInParcelDto

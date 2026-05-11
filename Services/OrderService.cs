@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
@@ -19,7 +20,7 @@ public class OrderService : IOrderService
 
     private static readonly string[] AdminSelectableStatuses =
     {
-        "Формирование заказа", "Ожидает оплату", "В сборке", "На доставку", "Отправлен", "Отменен"
+        "Формирование заказа", "Ожидает оплату", "Оплачен", "В сборке", "На доставку", "Отправлен", "Отменен"
     };
 
     private readonly AppDbContext _context;
@@ -172,7 +173,10 @@ public class OrderService : IOrderService
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => u);
 
-        var reviewedOrderIds = (await _context.OrderCustomerReviews.Select(r => r.OrderId).ToListAsync()).ToHashSet();
+        var reviewedOrderIds = (await _context.OrderCustomerReviews
+            .Where(r => r.OrderId.HasValue)
+            .Select(r => r.OrderId!.Value)
+            .ToListAsync()).ToHashSet();
 
         return orders.Select(o => MapToDto(o, users.GetValueOrDefault(o.UserId ?? 0), reviewedOrderIds.Contains(o.Id))).ToList();
     }
@@ -222,9 +226,10 @@ public class OrderService : IOrderService
 
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
 
+        var userOrderIds = orders.Select(o => o.Id).ToHashSet();
         var reviewedOrderIds = (await _context.OrderCustomerReviews
-            .Where(r => r.UserId == userId)
-            .Select(r => r.OrderId)
+            .Where(r => r.OrderId.HasValue && userOrderIds.Contains(r.OrderId.Value))
+            .Select(r => r.OrderId!.Value)
             .ToListAsync()).ToHashSet();
 
         return orders.Select(o => MapToDto(o, user, reviewedOrderIds.Contains(o.Id))).ToList();
@@ -269,23 +274,47 @@ public class OrderService : IOrderService
         return true;
     }
 
-    public async Task<bool> UpdateOrderStatusAsync(int orderId, string status)
+    /// <summary>Приводит строку статуса к канону (пробелы, старые названия из БД).</summary>
+    private static string NormalizeIncomingOrderStatus(string? raw)
     {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        var s = raw.Trim();
+        return s switch
+        {
+            "В пути" => "На доставку",
+            "Доставлен" => "Отправлен",
+            _ => s
+        };
+    }
+
+    private static string NormalizeOrderStatusForApi(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        return NormalizeIncomingOrderStatus(raw);
+    }
+
+    public async Task<OrderStatusUpdateOutcome> UpdateOrderStatusAsync(int orderId, string statusRaw)
+    {
+        var status = NormalizeIncomingOrderStatus(statusRaw);
+        if (string.IsNullOrWhiteSpace(status))
+            return new OrderStatusUpdateOutcome(false, "Не указан новый статус (пустое значение в запросе).");
+
         if (status == StatusReceived)
-            return false;
+            return new OrderStatusUpdateOutcome(false, "Статус «Получен» может установить только клиент на сайте.");
 
         if (!AdminSelectableStatuses.Contains(status))
-            return false;
+            return new OrderStatusUpdateOutcome(false,
+                $"Статус «{status}» недоступен для смены. Допустимые: {string.Join(", ", AdminSelectableStatuses)}.");
 
         var order = await _context.Orders.FindAsync(orderId);
         if (order == null)
-            return false;
+            return new OrderStatusUpdateOutcome(false, "Заказ не найден.");
 
         // После подтверждения получения клиентом статус менять нельзя.
-        if (order.Status == StatusReceived)
-            return false;
+        if (string.Equals(order.Status?.Trim(), StatusReceived, StringComparison.Ordinal))
+            return new OrderStatusUpdateOutcome(false, "Заказ уже в статусе «Получен» — изменение статуса запрещено.");
 
-        var previousStatus = order.Status;
+        var previousStatus = order.Status?.Trim() ?? string.Empty;
         order.Status = status;
         order.UpdatedAt = DateTime.UtcNow;
 
@@ -322,6 +351,7 @@ public class OrderService : IOrderService
             {
                 "Формирование заказа" => "формирование заказа",
                 "Ожидает оплату" => "ожидает оплату",
+                "Оплачен" => "оплачен",
                 "В сборке" => "в сборке",
                 "На доставку" => "на доставку",
                 "Отправлен" => "отправлен",
@@ -373,7 +403,7 @@ public class OrderService : IOrderService
             }
         }
 
-        return true;
+        return new OrderStatusUpdateOutcome(true);
     }
 
     public async Task<OrderStatisticsDto> GetStatisticsAsync()
@@ -480,7 +510,7 @@ public class OrderService : IOrderService
                     TelegramCommentMessageId = nextQueue.CommentMessageId != 0 ? nextQueue.CommentMessageId : null
                 };
 
-                var statusesAllowedToAdd = new[] { "Формирование заказа", "Ожидает оплату" };
+                var statusesAllowedToAdd = new[] { "Формирование заказа", "Ожидает оплату", "Оплачен" };
                 var existingOrder = await _context.Orders
                     .Include(o => o.OrderItems)
                     .Where(o => o.UserId == nextUser.Id && statusesAllowedToAdd.Contains(o.Status))
@@ -565,7 +595,7 @@ public class OrderService : IOrderService
         if (product == null)
             return new ReserveFromTelegramResultDto { Success = false, Reason = "ProductNotFound" };
 
-        var activeStatuses = new[] { "Ожидает оплату", "В сборке", "На доставку", "Отправлен", StatusReceived };
+        var activeStatuses = new[] { "Ожидает оплату", "Оплачен", "В сборке", "На доставку", "Отправлен", StatusReceived };
         var alreadyReserved = await _context.OrderItems
             .AnyAsync(oi => oi.ProductId == product.Id && _context.Orders.Any(o => o.Id == oi.OrderId && activeStatuses.Contains(o.Status)));
         if (alreadyReserved)
@@ -640,8 +670,8 @@ public class OrderService : IOrderService
             TelegramCommentMessageId = commentMessageId
         };
 
-        // Добавляем в существующий заказ только если статус «Формирование заказа» или «Ожидает оплату»; иначе создаём новый
-        var statusesAllowedToAdd = new[] { "Формирование заказа", "Ожидает оплату" };
+        // Добавляем в существующий заказ только в начальных статусах; иначе создаём новый
+        var statusesAllowedToAdd = new[] { "Формирование заказа", "Ожидает оплату", "Оплачен" };
         var existingOrder = await _context.Orders
             .Include(o => o.OrderItems)
             .Where(o => o.UserId == user.Id && statusesAllowedToAdd.Contains(o.Status))
@@ -781,7 +811,7 @@ public class OrderService : IOrderService
         if (!adminExists)
             throw new InvalidOperationException("Пользователь администратора не найден");
 
-        Order order;
+        Order? order = null;
         var orderNo = dto.OrderNumber?.Trim();
         if (!string.IsNullOrEmpty(orderNo))
         {
@@ -794,35 +824,28 @@ public class OrderService : IOrderService
                 throw new InvalidOperationException("Отзыв по этому заказу уже существует.");
             order = found;
         }
+
+        DateTime createdAt;
+        if (!string.IsNullOrWhiteSpace(dto.CreatedDate) &&
+            DateOnly.TryParse(dto.CreatedDate.Trim(), CultureInfo.InvariantCulture, out var dOnly))
+            createdAt = dOnly.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
         else
-        {
-            var suffix = Guid.NewGuid().ToString("N")[..8].ToUpperInvariant();
-            order = new Order
-            {
-                OrderNumber = $"ADM-{DateTime.UtcNow:yyyyMMdd}-{suffix}",
-                CustomerName = string.IsNullOrWhiteSpace(dto.CustomerName) ? "Клиент" : dto.CustomerName.Trim(),
-                CustomerPhone = string.IsNullOrWhiteSpace(dto.CustomerPhone) ? "—" : dto.CustomerPhone.Trim(),
-                Status = StatusReceived,
-                TotalAmount = 0,
-                DiscountType = "None",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            _context.Orders.Add(order);
-            await _context.SaveChangesAsync();
-        }
+            createdAt = dto.CreatedAtUtc ?? DateTime.UtcNow;
 
         var imagePaths = await SaveReviewImagesFromBase64Async(dto.ImagesBase64);
-        var createdAt = dto.CreatedAtUtc ?? DateTime.UtcNow;
+        var manualName = string.IsNullOrWhiteSpace(dto.CustomerName) ? null : dto.CustomerName.Trim();
+        var manualPhone = string.IsNullOrWhiteSpace(dto.CustomerPhone) ? null : dto.CustomerPhone.Trim();
 
         var review = new OrderCustomerReview
         {
-            OrderId = order.Id,
+            OrderId = order?.Id,
             UserId = adminUserId,
             Rating = dto.Rating,
             Comment = trimmedComment,
             CreatedAtUtc = createdAt,
-            ReviewImagesJson = imagePaths.Count > 0 ? JsonSerializer.Serialize(imagePaths) : null
+            ReviewImagesJson = imagePaths.Count > 0 ? JsonSerializer.Serialize(imagePaths) : null,
+            ManualCustomerName = order == null ? manualName : null,
+            ManualCustomerPhone = order == null ? manualPhone : null
         };
         _context.OrderCustomerReviews.Add(review);
         await _context.SaveChangesAsync();
@@ -835,19 +858,64 @@ public class OrderService : IOrderService
         return MapOrderCustomerReviewToAdminDto(saved);
     }
 
+    public async Task<bool> DeleteCustomerReviewAsync(int reviewId)
+    {
+        var r = await _context.OrderCustomerReviews.FirstOrDefaultAsync(x => x.Id == reviewId);
+        if (r == null) return false;
+
+        foreach (var path in DeserializeReviewImagePaths(r.ReviewImagesJson))
+        {
+            if (string.IsNullOrWhiteSpace(path) || path.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var relative = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+            var full = Path.Combine(AppPaths.WwwRoot(_environment), relative);
+            try
+            {
+                if (File.Exists(full))
+                    File.Delete(full);
+            }
+            catch
+            {
+                // ignore file errors
+            }
+        }
+
+        _context.OrderCustomerReviews.Remove(r);
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    private const string AbsentDisplay = "Отсутствует";
+
     private static OrderCustomerReviewAdminDto MapOrderCustomerReviewToAdminDto(OrderCustomerReview r)
     {
+        string orderNumber;
+        string customerName;
+        string? customerPhone;
+
+        if (r.OrderId.HasValue && r.Order != null)
+        {
+            orderNumber = string.IsNullOrWhiteSpace(r.Order.OrderNumber) ? AbsentDisplay : r.Order.OrderNumber;
+            customerName = r.User?.FullName ?? r.User?.Username ?? r.Order.CustomerName;
+            if (string.IsNullOrWhiteSpace(customerName))
+                customerName = AbsentDisplay;
+            customerPhone = r.Order.CustomerPhone ?? r.User?.Phone;
+        }
+        else
+        {
+            orderNumber = AbsentDisplay;
+            customerName = string.IsNullOrWhiteSpace(r.ManualCustomerName) ? AbsentDisplay : r.ManualCustomerName!;
+            customerPhone = string.IsNullOrWhiteSpace(r.ManualCustomerPhone) ? null : r.ManualCustomerPhone;
+        }
+
         return new OrderCustomerReviewAdminDto
         {
             Id = r.Id,
             OrderId = r.OrderId,
-            OrderNumber = r.Order?.OrderNumber ?? $"#{r.OrderId}",
+            OrderNumber = orderNumber,
             UserId = r.UserId,
-            CustomerName = r.User?.FullName
-                ?? r.User?.Username
-                ?? r.Order?.CustomerName
-                ?? (r.UserId.HasValue ? $"Пользователь #{r.UserId}" : "—"),
-            CustomerPhone = r.Order?.CustomerPhone ?? r.User?.Phone,
+            CustomerName = customerName,
+            CustomerPhone = customerPhone,
             Rating = r.Rating,
             Comment = r.Comment,
             CreatedAtUtc = r.CreatedAtUtc,
@@ -1014,7 +1082,7 @@ public class OrderService : IOrderService
             .OrderBy(h => h.ChangedAtUtc)
             .Select(h => new OrderStatusHistoryDto
             {
-                Status = h.Status,
+                Status = NormalizeOrderStatusForApi(h.Status),
                 ChangedAtUtc = h.ChangedAtUtc,
                 ChangedByUserId = h.ChangedByUserId,
                 ActorKind = ActorKindLabel(h.ChangedByUserId, order.UserId)
@@ -1033,7 +1101,7 @@ public class OrderService : IOrderService
             Comment = order.Comment,
             TotalAmount = order.TotalAmount,
             FinalAmount = GetFinalAmount(order),
-            Status = order.Status,
+            Status = NormalizeOrderStatusForApi(order.Status),
             DiscountType = order.DiscountType ?? "None",
             FixedDiscountPercent = order.FixedDiscountPercent,
             Condition1ItemPercent = order.Condition1ItemPercent,
