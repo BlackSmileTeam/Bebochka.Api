@@ -306,21 +306,39 @@ public class OrderService : IOrderService
             return new OrderStatusUpdateOutcome(false,
                 $"Статус «{status}» недоступен для смены. Допустимые: {string.Join(", ", AdminSelectableStatuses)}.");
 
-        var order = await _context.Orders.FindAsync(orderId);
+        var order = await _context.Orders
+            .Include(o => o.OrderItems)
+            .FirstOrDefaultAsync(o => o.Id == orderId);
         if (order == null)
             return new OrderStatusUpdateOutcome(false, "Заказ не найден.");
 
-        // После подтверждения получения клиентом статус менять нельзя.
-        if (string.Equals(order.Status?.Trim(), StatusReceived, StringComparison.Ordinal))
+        var previousStatus = order.Status?.Trim() ?? string.Empty;
+
+        // Конечные статусы: менять нельзя.
+        if (string.Equals(previousStatus, StatusReceived, StringComparison.Ordinal))
             return new OrderStatusUpdateOutcome(false, "Заказ уже в статусе «Получен» — изменение статуса запрещено.");
 
-        var previousStatus = order.Status?.Trim() ?? string.Empty;
+        if (string.Equals(previousStatus, "Отменен", StringComparison.Ordinal))
+            return new OrderStatusUpdateOutcome(false, "Заказ отменён — изменение статуса запрещено.");
+
         order.Status = status;
         order.UpdatedAt = DateTime.UtcNow;
 
-        if (status == "Отменен" && order.CancelledAt == null)
+        if (status == "Отменен")
         {
-            order.CancelledAt = DateTime.UtcNow;
+            if (order.CancelledAt == null)
+                order.CancelledAt = DateTime.UtcNow;
+
+            // Возврат товаров в каталог (как при CancelOrderAsync).
+            foreach (var item in order.OrderItems)
+            {
+                var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
+                if (product != null)
+                    product.QuantityInStock += item.Quantity;
+            }
+
+            var cancelledProductIds = order.OrderItems.Select(oi => oi.ProductId).Distinct().ToList();
+            await RemoveReserveQueueForProductsAsync(cancelledProductIds);
         }
 
         if (status == "Отправлен")
