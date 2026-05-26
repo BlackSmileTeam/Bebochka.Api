@@ -498,7 +498,8 @@ public class AuthService : IAuthService
             FullName = user.FullName,
             UserId = user.Id,
             IsAdmin = user.IsAdmin,
-            Email = user.Email
+            Email = user.Email,
+            Phone = user.Phone
         };
     }
 
