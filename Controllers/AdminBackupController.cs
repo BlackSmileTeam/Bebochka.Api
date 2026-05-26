@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using Bebochka.Api.Helpers;
+using Bebochka.Api.Models.DTOs;
+using Bebochka.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using MySqlConnector;
@@ -14,59 +16,77 @@ public class AdminBackupController : ControllerBase
 {
     private readonly IWebHostEnvironment _env;
     private readonly IConfiguration _config;
+    private readonly BackupService _backupService;
+    private readonly BackupJobStore _jobStore;
 
-    public AdminBackupController(IWebHostEnvironment env, IConfiguration config)
+    public AdminBackupController(
+        IWebHostEnvironment env,
+        IConfiguration config,
+        BackupService backupService,
+        BackupJobStore jobStore)
     {
         _env = env;
         _config = config;
+        _backupService = backupService;
+        _jobStore = jobStore;
     }
 
-    [HttpGet("download")]
-    public async Task<IActionResult> Download(CancellationToken ct)
+    [HttpPost("start")]
+    public ActionResult Start([FromBody] StartBackupDto dto)
     {
-        var tmpRoot = Path.Combine(Path.GetTempPath(), "bebochka-backup");
-        Directory.CreateDirectory(tmpRoot);
-        var stamp = DateTime.UtcNow.ToString("yyyy-MM-dd_HH-mm-ss");
+        if (!DateOnly.TryParse(dto.DateFrom, out var dateFrom))
+            return BadRequest(new { message = "Укажите корректную дату «с»." });
+        if (!DateOnly.TryParse(dto.DateTo, out var dateTo))
+            return BadRequest(new { message = "Укажите корректную дату «по»." });
+        if (dateTo < dateFrom)
+            return BadRequest(new { message = "Дата «по» не может быть раньше даты «с»." });
 
-        var zipPath = Path.Combine(tmpRoot, $"bebochka_backup_{stamp}.zip");
-        if (System.IO.File.Exists(zipPath))
-            System.IO.File.Delete(zipPath);
-
-        var uploadsDir = Path.Combine(AppPaths.WwwRoot(_env), "uploads");
-        if (!Directory.Exists(uploadsDir))
-            Directory.CreateDirectory(uploadsDir);
-
-        var cs = _config.GetConnectionString("DefaultConnection")
-                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-        var b = new MySqlConnectionStringBuilder(cs);
-
-        await using (var zipFs = System.IO.File.Create(zipPath))
-        using (var zip = new ZipArchive(zipFs, ZipArchiveMode.Create, leaveOpen: false))
+        try
         {
-            // DB dump (gz)
-            var dbEntry = zip.CreateEntry($"db/{b.Database}_{stamp}.sql.gz", CompressionLevel.Optimal);
-            await using (var entryStream = dbEntry.Open())
-            await using (var gz = new GZipStream(entryStream, CompressionLevel.Optimal, leaveOpen: false))
+            var jobId = _backupService.StartJob(dateFrom, dateTo);
+            return Ok(new
             {
-                await RunMySqlDumpToStreamAsync(b, gz, ct);
-            }
-
-            // uploads/
-            AddDirectoryToZip(zip, uploadsDir, "uploads");
-
-            // manifest
-            var manifest = zip.CreateEntry("manifest.txt", CompressionLevel.Optimal);
-            await using (var ms = new StreamWriter(manifest.Open()))
-            {
-                await ms.WriteLineAsync($"created_utc={DateTime.UtcNow:O}");
-                await ms.WriteLineAsync($"db={b.Database}");
-                await ms.WriteLineAsync($"uploads_dir={uploadsDir}");
-            }
+                jobId,
+                dateFrom = dateFrom.ToString("yyyy-MM-dd"),
+                dateTo = dateTo.ToString("yyyy-MM-dd")
+            });
         }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 
-        var outName = Path.GetFileName(zipPath);
-        var stream = new FileStream(zipPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 64, FileOptions.DeleteOnClose);
-        return File(stream, "application/zip", outName);
+    [HttpGet("progress/{jobId}")]
+    public ActionResult<BackupProgressDto> Progress(string jobId)
+    {
+        var job = _jobStore.Get(jobId);
+        if (job == null)
+            return NotFound(new { message = "Задача не найдена." });
+
+        return Ok(new BackupProgressDto
+        {
+            Percent = job.Percent,
+            Stage = job.Stage,
+            Status = job.Status.ToString().ToLowerInvariant(),
+            Error = job.Error,
+            FileName = job.FileName
+        });
+    }
+
+    [HttpGet("download/{jobId}")]
+    public IActionResult Download(string jobId)
+    {
+        var job = _jobStore.Get(jobId);
+        if (job == null)
+            return NotFound(new { message = "Задача не найдена." });
+        if (job.Status != BackupJobStatus.Completed || string.IsNullOrEmpty(job.ZipPath) || !System.IO.File.Exists(job.ZipPath))
+            return BadRequest(new { message = "Архив ещё не готов." });
+
+        var fileName = job.FileName ?? Path.GetFileName(job.ZipPath);
+        var stream = new FileStream(job.ZipPath, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 64, FileOptions.DeleteOnClose);
+        _jobStore.Remove(jobId);
+        return File(stream, "application/zip", fileName);
     }
 
     [HttpPost("restore")]
@@ -92,11 +112,20 @@ public class AdminBackupController : ControllerBase
         Directory.CreateDirectory(extractDir);
         ZipFile.ExtractToDirectory(zipPath, extractDir, overwriteFiles: true);
 
+        // v2: JSON + uploads (периодический бэкап)
+        var manifestV2 = Path.Combine(extractDir, "manifest.json");
+        if (System.IO.File.Exists(manifestV2))
+        {
+            return BadRequest(new
+            {
+                message = "Это архив за период (JSON). Полное восстановление из такого архива пока не поддерживается — используйте полный бэкап с дампом БД."
+            });
+        }
+
         var cs = _config.GetConnectionString("DefaultConnection")
                  ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
         var b = new MySqlConnectionStringBuilder(cs);
 
-        // restore db: pick first *.sql or *.sql.gz under db/
         var dbDir = Path.Combine(extractDir, "db");
         if (!Directory.Exists(dbDir))
             return BadRequest(new { message = "В архиве нет папки db/." });
@@ -118,7 +147,6 @@ public class AdminBackupController : ControllerBase
             await RunMySqlImportFromStreamAsync(b, inFs, ct);
         }
 
-        // restore uploads: replace uploads dir
         var uploadsFrom = Path.Combine(extractDir, "uploads");
         if (Directory.Exists(uploadsFrom))
         {
@@ -134,38 +162,6 @@ public class AdminBackupController : ControllerBase
         }
 
         return Ok(new { message = "Бэкап восстановлен." });
-    }
-
-    private static async Task RunMySqlDumpToStreamAsync(MySqlConnectionStringBuilder b, Stream output, CancellationToken ct)
-    {
-        var args = string.Join(' ', new[]
-        {
-            "-h", Quote(b.Server),
-            "-P", b.Port.ToString(),
-            "-u", Quote(b.UserID),
-            Quote(b.Database),
-            "--single-transaction",
-            "--quick",
-            "--routines",
-            "--triggers",
-            "--events"
-        });
-
-        var psi = new ProcessStartInfo("mysqldump", args)
-        {
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-        if (!string.IsNullOrEmpty(b.Password))
-            psi.Environment["MYSQL_PWD"] = b.Password;
-
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("Не удалось запустить mysqldump.");
-        await p.StandardOutput.BaseStream.CopyToAsync(output, ct);
-        var err = await p.StandardError.ReadToEndAsync(ct);
-        await p.WaitForExitAsync(ct);
-        if (p.ExitCode != 0)
-            throw new InvalidOperationException($"mysqldump failed: {err}");
     }
 
     private static async Task RunMySqlImportFromStreamAsync(MySqlConnectionStringBuilder b, Stream input, CancellationToken ct)
@@ -197,19 +193,6 @@ public class AdminBackupController : ControllerBase
             throw new InvalidOperationException($"mysql import failed: {err}");
     }
 
-    private static void AddDirectoryToZip(ZipArchive zip, string dir, string zipRoot)
-    {
-        var files = Directory.GetFiles(dir, "*", SearchOption.AllDirectories);
-        foreach (var f in files)
-        {
-            var rel = Path.GetRelativePath(dir, f).Replace('\\', '/');
-            var entry = zip.CreateEntry($"{zipRoot}/{rel}", CompressionLevel.Optimal);
-            using var entryStream = entry.Open();
-            using var fs = System.IO.File.OpenRead(f);
-            fs.CopyTo(entryStream);
-        }
-    }
-
     private static void CopyDirectory(string from, string to)
     {
         Directory.CreateDirectory(to);
@@ -228,4 +211,3 @@ public class AdminBackupController : ControllerBase
         return s.Contains(' ') ? $"\"{s.Replace("\"", "\\\"")}\"" : s;
     }
 }
-

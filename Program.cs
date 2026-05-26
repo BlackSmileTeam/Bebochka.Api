@@ -218,6 +218,8 @@ builder.Services.AddAuthorization();
         builder.Services.AddScoped<IEmailService, EmailService>();
         builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
         builder.Services.AddScoped<CollageService>();
+        builder.Services.AddSingleton<BackupJobStore>();
+        builder.Services.AddScoped<BackupService>();
         
         // Add HttpClient for Telegram Bot API
         builder.Services.AddHttpClient<ITelegramNotificationService, TelegramNotificationService>(client =>

@@ -25,9 +25,6 @@ public class IncomingShipmentsController : ControllerBase
         var shipments = await _context.IncomingShipments
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
-        var expenses = await _context.IncomingShipmentExpenses
-            .OrderByDescending(e => e.CreatedAt)
-            .ToListAsync();
 
         var shipmentIds = shipments.Select(s => s.Id).ToList();
         var revenueByShipment = await (
@@ -41,15 +38,8 @@ public class IncomingShipmentsController : ControllerBase
             select new { ShipmentId = g.Key, Revenue = g.Sum(x => x.ProductPrice * x.Quantity) }
         ).ToListAsync();
         var revenueMap = revenueByShipment.ToDictionary(x => x.ShipmentId, x => x.Revenue);
-        var expensesMap = expenses
-            .GroupBy(e => e.IncomingShipmentId)
-            .ToDictionary(g => g.Key, g => g.ToList());
 
-        return Ok(shipments.Select(s => MapToDto(
-            s,
-            revenueMap.GetValueOrDefault(s.Id),
-            expensesMap.GetValueOrDefault(s.Id, new List<IncomingShipmentExpense>())
-        )).ToList());
+        return Ok(shipments.Select(s => MapToDto(s, revenueMap.GetValueOrDefault(s.Id))).ToList());
     }
 
     [HttpPost]
@@ -71,13 +61,7 @@ public class IncomingShipmentsController : ControllerBase
 
         _context.IncomingShipments.Add(entity);
         await _context.SaveChangesAsync();
-        await ReplaceExpensesAsync(entity.Id, dto.Expenses);
-
-        var createdExpenses = await _context.IncomingShipmentExpenses
-            .Where(e => e.IncomingShipmentId == entity.Id)
-            .OrderByDescending(e => e.CreatedAt)
-            .ToListAsync();
-        return CreatedAtAction(nameof(GetAll), new { id = entity.Id }, MapToDto(entity, null, createdExpenses));
+        return CreatedAtAction(nameof(GetAll), new { id = entity.Id }, MapToDto(entity, null));
     }
 
     [HttpPut("{id:int}")]
@@ -94,7 +78,6 @@ public class IncomingShipmentsController : ControllerBase
         entity.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
-        await ReplaceExpensesAsync(id, dto.Expenses);
 
         var revenue = await (
             from oi in _context.OrderItems
@@ -103,12 +86,8 @@ public class IncomingShipmentsController : ControllerBase
             where p.IncomingShipmentId == id && o.Status == "Получен"
             select (decimal?)(oi.ProductPrice * oi.Quantity)
         ).SumAsync();
-        var expenses = await _context.IncomingShipmentExpenses
-            .Where(e => e.IncomingShipmentId == id)
-            .OrderByDescending(e => e.CreatedAt)
-            .ToListAsync();
 
-        return Ok(MapToDto(entity, revenue, expenses));
+        return Ok(MapToDto(entity, revenue));
     }
 
     [HttpDelete("{id:int}")]
@@ -131,56 +110,17 @@ public class IncomingShipmentsController : ControllerBase
         return NoContent();
     }
 
-    private async Task ReplaceExpensesAsync(int incomingShipmentId, List<CreateIncomingShipmentExpenseDto>? items)
+    private static IncomingShipmentDto MapToDto(IncomingShipment s, decimal? revenue) => new()
     {
-        var prev = await _context.IncomingShipmentExpenses
-            .Where(e => e.IncomingShipmentId == incomingShipmentId)
-            .ToListAsync();
-        if (prev.Count > 0)
-            _context.IncomingShipmentExpenses.RemoveRange(prev);
-
-        if (items != null && items.Count > 0)
-        {
-            var rows = items
-                .Where(i => !string.IsNullOrWhiteSpace(i.Name) && i.Amount > 0)
-                .Select(i => new IncomingShipmentExpense
-                {
-                    IncomingShipmentId = incomingShipmentId,
-                    Name = i.Name.Trim(),
-                    Amount = i.Amount,
-                    CreatedAt = DateTime.UtcNow
-                });
-            _context.IncomingShipmentExpenses.AddRange(rows);
-        }
-
-        await _context.SaveChangesAsync();
-    }
-
-    private static IncomingShipmentDto MapToDto(IncomingShipment s, decimal? revenue, List<IncomingShipmentExpense> expenses)
-    {
-        var miscExpenses = expenses.Sum(e => e.Amount);
-        var totalExpenses = s.OrderedAmount + miscExpenses;
-        return new IncomingShipmentDto
-        {
-            Id = s.Id,
-            Name = s.Name,
-            WeightKg = s.WeightKg,
-            ItemCount = s.ItemCount,
-            OrderedAmount = s.OrderedAmount,
-            Revenue = revenue,
-            MiscExpensesTotal = miscExpenses,
-            TotalExpenses = totalExpenses,
-            ActualMargin = revenue.HasValue ? revenue.Value - s.OrderedAmount - miscExpenses : null,
-            Notes = s.Notes,
-            Expenses = expenses.Select(e => new IncomingShipmentExpenseDto
-            {
-                Id = e.Id,
-                Name = e.Name,
-                Amount = e.Amount,
-                CreatedAt = e.CreatedAt
-            }).ToList(),
-            CreatedAt = s.CreatedAt,
-            UpdatedAt = s.UpdatedAt
-        };
-    }
+        Id = s.Id,
+        Name = s.Name,
+        WeightKg = s.WeightKg,
+        ItemCount = s.ItemCount,
+        OrderedAmount = s.OrderedAmount,
+        Revenue = revenue,
+        ActualMargin = revenue.HasValue ? revenue.Value - s.OrderedAmount : null,
+        Notes = s.Notes,
+        CreatedAt = s.CreatedAt,
+        UpdatedAt = s.UpdatedAt
+    };
 }

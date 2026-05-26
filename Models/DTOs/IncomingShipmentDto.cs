@@ -8,11 +8,8 @@ public class IncomingShipmentDto
     public int ItemCount { get; set; }
     public decimal OrderedAmount { get; set; }
     public decimal? Revenue { get; set; }
-    public decimal MiscExpensesTotal { get; set; }
-    public decimal TotalExpenses { get; set; }
     public decimal? ActualMargin { get; set; }
     public string? Notes { get; set; }
-    public List<IncomingShipmentExpenseDto> Expenses { get; set; } = new();
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }
@@ -24,7 +21,6 @@ public class CreateIncomingShipmentDto
     public int ItemCount { get; set; }
     public decimal OrderedAmount { get; set; }
     public string? Notes { get; set; }
-    public List<CreateIncomingShipmentExpenseDto>? Expenses { get; set; }
 }
 
 public class UpdateIncomingShipmentDto
@@ -34,19 +30,27 @@ public class UpdateIncomingShipmentDto
     public int ItemCount { get; set; }
     public decimal OrderedAmount { get; set; }
     public string? Notes { get; set; }
-    public List<CreateIncomingShipmentExpenseDto>? Expenses { get; set; }
 }
 
-public class IncomingShipmentExpenseDto
+public class MiscExpenseDto
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public decimal Amount { get; set; }
+    public int? IncomingShipmentId { get; set; }
     public DateTime CreatedAt { get; set; }
 }
 
-public class CreateIncomingShipmentExpenseDto
+public class CreateMiscExpenseDto
 {
     public string Name { get; set; } = string.Empty;
     public decimal Amount { get; set; }
+    public int? IncomingShipmentId { get; set; }
+}
+
+public class UpdateMiscExpenseDto
+{
+    public string Name { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public int? IncomingShipmentId { get; set; }
 }
