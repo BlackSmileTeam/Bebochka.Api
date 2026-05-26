@@ -32,16 +32,17 @@ builder.Configuration.AddUserSecrets(typeof(Program).Assembly);
 // Configure Kestrel
 builder.WebHost.ConfigureKestrel(options =>
 {
-    options.Limits.MaxRequestBodySize = 15 * 1024 * 1024; // 15MB для base64 JSON
+    // Для бэкапов (архив БД + фото) нужен большой лимит.
+    options.Limits.MaxRequestBodySize = 1024L * 1024 * 1024; // 1GB
     // Отключаем проверку скорости передачи данных
     options.Limits.MinRequestBodyDataRate = null;
     options.Limits.MinResponseDataRate = null;
 });
 
-// Configure form options for file uploads (max 10MB)
+// Configure form options for file uploads
 builder.Services.Configure<FormOptions>(options =>
 {
-    options.MultipartBodyLengthLimit = 10 * 1024 * 1024; // 10MB
+    options.MultipartBodyLengthLimit = 1024L * 1024 * 1024; // 1GB
     options.ValueLengthLimit = int.MaxValue;
     options.MultipartHeadersLengthLimit = int.MaxValue;
     options.MultipartBoundaryLengthLimit = int.MaxValue;
