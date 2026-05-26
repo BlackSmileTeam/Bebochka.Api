@@ -346,7 +346,7 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.IncomingShipment)
                 .WithMany()
                 .HasForeignKey(e => e.IncomingShipmentId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

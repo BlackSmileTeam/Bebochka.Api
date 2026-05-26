@@ -7,9 +7,12 @@ public class IncomingShipmentExpense
 {
     public int Id { get; set; }
 
-    public int IncomingShipmentId { get; set; }
+    /// <summary>
+    /// Может быть NULL — расход не привязан к конкретному поступлению.
+    /// </summary>
+    public int? IncomingShipmentId { get; set; }
 
-    public IncomingShipment IncomingShipment { get; set; } = null!;
+    public IncomingShipment? IncomingShipment { get; set; }
 
     public string Name { get; set; } = string.Empty;
 

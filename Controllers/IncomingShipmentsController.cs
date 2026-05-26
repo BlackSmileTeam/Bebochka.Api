@@ -170,7 +170,7 @@ public class IncomingShipmentsController : ControllerBase
             Revenue = revenue,
             MiscExpensesTotal = miscExpenses,
             TotalExpenses = totalExpenses,
-            ActualMargin = revenue.HasValue ? s.OrderedAmount - revenue.Value + miscExpenses : null,
+            ActualMargin = revenue.HasValue ? revenue.Value - s.OrderedAmount - miscExpenses : null,
             Notes = s.Notes,
             Expenses = expenses.Select(e => new IncomingShipmentExpenseDto
             {
