@@ -16,6 +16,7 @@ public static class DbSchemaBootstrap
 
         try
         {
+            await EnsurePersonalDataConsentLogsTableAsync(db, logger, ct);
             await EnsureMiscExpensesNullableShipmentAsync(db, logger, ct);
         }
         catch (Exception ex)
@@ -23,6 +24,62 @@ public static class DbSchemaBootstrap
             logger.LogError(ex, "Schema bootstrap failed");
             throw;
         }
+    }
+
+    private static async Task EnsurePersonalDataConsentLogsTableAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var exists = await ScalarIntAsync(db,
+            """
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'personaldataconsentlogs'
+            """, ct);
+
+        if (exists > 0)
+        {
+            logger.LogInformation("Table personaldataconsentlogs already exists");
+            return;
+        }
+
+        var usersTable = await ScalarStringAsync(db,
+            """
+            SELECT TABLE_NAME
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'users'
+            LIMIT 1
+            """, ct);
+
+        if (string.IsNullOrEmpty(usersTable))
+        {
+            logger.LogWarning("Table users not found, skip personaldataconsentlogs creation");
+            return;
+        }
+
+        logger.LogWarning("Creating table personaldataconsentlogs");
+
+        await db.Database.ExecuteSqlRawAsync(
+            $"""
+             CREATE TABLE PersonalDataConsentLogs (
+               Id INT AUTO_INCREMENT PRIMARY KEY,
+               UserId INT NOT NULL,
+               ConsentKind VARCHAR(80) NOT NULL,
+               AcceptedAtUtc DATETIME NOT NULL,
+               IpAddress VARCHAR(45) NULL,
+               UserAgent TEXT NULL,
+               DeviceType VARCHAR(32) NULL,
+               ExtraJson TEXT NULL,
+               INDEX IX_PersonalDataConsentLogs_UserId (UserId),
+               INDEX IX_PersonalDataConsentLogs_AcceptedAtUtc (AcceptedAtUtc),
+               CONSTRAINT FK_PersonalDataConsentLogs_Users FOREIGN KEY (UserId) REFERENCES `{usersTable}` (Id) ON DELETE RESTRICT
+             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+             """, ct);
+
+        logger.LogInformation("Table personaldataconsentlogs created");
     }
 
     private static async Task EnsureMiscExpensesNullableShipmentAsync(

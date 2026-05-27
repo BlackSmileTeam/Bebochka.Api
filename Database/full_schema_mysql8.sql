@@ -26,6 +26,20 @@ CREATE TABLE Users (
   UNIQUE KEY uk_users_google (GoogleSub)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE PersonalDataConsentLogs (
+  Id INT AUTO_INCREMENT PRIMARY KEY,
+  UserId INT NOT NULL,
+  ConsentKind VARCHAR(80) NOT NULL,
+  AcceptedAtUtc DATETIME NOT NULL,
+  IpAddress VARCHAR(45) NULL,
+  UserAgent TEXT NULL,
+  DeviceType VARCHAR(32) NULL,
+  ExtraJson TEXT NULL,
+  INDEX IX_PersonalDataConsentLogs_UserId (UserId),
+  INDEX IX_PersonalDataConsentLogs_AcceptedAtUtc (AcceptedAtUtc),
+  CONSTRAINT FK_PersonalDataConsentLogs_Users FOREIGN KEY (UserId) REFERENCES Users (Id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE Products (
   Id INT AUTO_INCREMENT PRIMARY KEY,
   Name VARCHAR(200) NOT NULL,
