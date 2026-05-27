@@ -16,6 +16,7 @@ public static class DbSchemaBootstrap
 
         try
         {
+            await EnsureTelegramErrorsTableAsync(db, logger, ct);
             await EnsurePersonalDataConsentLogsTableAsync(db, logger, ct);
             await EnsureMiscExpensesNullableShipmentAsync(db, logger, ct);
         }
@@ -80,6 +81,45 @@ public static class DbSchemaBootstrap
              """, ct);
 
         logger.LogInformation("Table personaldataconsentlogs created");
+    }
+
+    private static async Task EnsureTelegramErrorsTableAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var exists = await ScalarIntAsync(db,
+            """
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'telegramerrors'
+            """, ct);
+
+        if (exists > 0)
+        {
+            logger.LogInformation("Table telegramerrors already exists");
+            return;
+        }
+
+        logger.LogWarning("Creating table telegramerrors");
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE TABLE TelegramErrors (
+              Id INT AUTO_INCREMENT PRIMARY KEY,
+              Message VARCHAR(2000) NOT NULL,
+              Details TEXT NULL,
+              ErrorType VARCHAR(100) NOT NULL,
+              ProductInfo VARCHAR(1000) NULL,
+              ChannelId VARCHAR(100) NULL,
+              ErrorDate DATETIME NOT NULL,
+              INDEX IX_TelegramErrors_ErrorDate (ErrorDate),
+              INDEX IX_TelegramErrors_ErrorType (ErrorType)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """, ct);
+
+        logger.LogInformation("Table telegramerrors created");
     }
 
     private static async Task EnsureMiscExpensesNullableShipmentAsync(

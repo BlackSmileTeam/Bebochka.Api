@@ -4,6 +4,7 @@ using Bebochka.Api.Data;
 using Bebochka.Api.Helpers;
 using Bebochka.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using MySqlConnector;
 
 namespace Bebochka.Api.Services;
 
@@ -108,9 +109,18 @@ public class BackupService
                 .Where(r => r.CreatedAt >= fromUtc && r.CreatedAt <= toUtc)
                 .ToListAsync(ct);
 
-            var telegramErrors = await db.TelegramErrors.AsNoTracking()
-                .Where(e => e.ErrorDate >= fromUtc && e.ErrorDate <= toUtc)
-                .ToListAsync(ct);
+            List<TelegramError> telegramErrors;
+            try
+            {
+                telegramErrors = await db.TelegramErrors.AsNoTracking()
+                    .Where(e => e.ErrorDate >= fromUtc && e.ErrorDate <= toUtc)
+                    .ToListAsync(ct);
+            }
+            catch (Exception ex) when (IsMissingTelegramErrorsTable(ex))
+            {
+                // Old production DBs may not have this table yet; backup should still finish.
+                telegramErrors = new List<TelegramError>();
+            }
 
             var consentLogs = await db.PersonalDataConsentLogs.AsNoTracking()
                 .Where(l => l.AcceptedAtUtc >= fromUtc && l.AcceptedAtUtc <= toUtc)
@@ -265,5 +275,12 @@ public class BackupService
                 list.Add((rel.Replace('\\', '/'), full));
         }
         return list;
+    }
+
+    private static bool IsMissingTelegramErrorsTable(Exception ex)
+    {
+        if (ex is MySqlException mySqlEx && mySqlEx.Message.Contains("telegramerrors", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return ex.Message.Contains("telegramerrors", StringComparison.OrdinalIgnoreCase);
     }
 }
