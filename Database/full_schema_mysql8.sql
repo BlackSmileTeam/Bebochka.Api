@@ -65,13 +65,14 @@ CREATE TABLE IncomingShipments (
 
 CREATE TABLE IncomingShipmentExpenses (
   Id INT AUTO_INCREMENT PRIMARY KEY,
-  IncomingShipmentId INT NOT NULL,
+  IncomingShipmentId INT NULL,
   Name VARCHAR(120) NOT NULL,
   Amount DECIMAL(10,2) NOT NULL DEFAULT 0,
   CreatedAt DATETIME NOT NULL,
   INDEX IX_IncomingShipmentExpenses_ShipmentId (IncomingShipmentId),
+  INDEX IX_IncomingShipmentExpenses_CreatedAt (CreatedAt),
   CONSTRAINT FK_IncomingShipmentExpenses_IncomingShipments
-    FOREIGN KEY (IncomingShipmentId) REFERENCES IncomingShipments (Id) ON DELETE CASCADE
+    FOREIGN KEY (IncomingShipmentId) REFERENCES IncomingShipments (Id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE CartItems (

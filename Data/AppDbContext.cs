@@ -340,6 +340,7 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(120);
             entity.Property(e => e.Amount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.IncomingShipmentId).IsRequired(false);
             entity.Property(e => e.CreatedAt);
             entity.HasIndex(e => e.IncomingShipmentId);
             entity.HasIndex(e => e.CreatedAt);
