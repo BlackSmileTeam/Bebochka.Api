@@ -18,6 +18,10 @@ public static class ClientInfoHelper
                 return first.Length > 45 ? first[..45] : first;
         }
 
+        var cfIp = headers["CF-Connecting-IP"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(cfIp))
+            return cfIp.Length > 45 ? cfIp[..45] : cfIp;
+
         var realIp = headers["X-Real-IP"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(realIp))
             return realIp.Length > 45 ? realIp[..45] : realIp;
@@ -41,28 +45,43 @@ public static class ClientInfoHelper
         return "Unknown";
     }
 
-    public static string? BuildExtraJson(HttpRequest? request)
+    public static string? BuildExtraJson(HttpRequest? request, IReadOnlyDictionary<string, string?>? additional = null)
     {
-        if (request == null) return null;
+        if (request == null && (additional == null || additional.Count == 0)) return null;
 
         try
         {
             var o = new Dictionary<string, string?>();
-            var lang = request.Headers.AcceptLanguage.ToString();
-            if (!string.IsNullOrWhiteSpace(lang))
-                o["AcceptLanguage"] = lang.Length > 500 ? lang[..500] : lang;
 
-            var referer = request.Headers.Referer.ToString();
-            if (!string.IsNullOrWhiteSpace(referer))
-                o["Referer"] = referer.Length > 1000 ? referer[..1000] : referer;
+            void Put(string key, string? value, int maxLen = 1000)
+            {
+                if (string.IsNullOrWhiteSpace(value)) return;
+                o[key] = value.Length > maxLen ? value[..maxLen] : value;
+            }
 
-            var xff = request.Headers["X-Forwarded-For"].ToString();
-            if (!string.IsNullOrWhiteSpace(xff))
-                o["XForwardedFor"] = xff.Length > 500 ? xff[..500] : xff;
+            if (request != null)
+            {
+                Put("AcceptLanguage", request.Headers.AcceptLanguage.ToString(), 500);
+                Put("Referer", request.Headers.Referer.ToString());
+                Put("XForwardedFor", request.Headers["X-Forwarded-For"].ToString(), 500);
+                Put("XRealIp", request.Headers["X-Real-IP"].ToString(), 45);
+                Put("CfConnectingIp", request.Headers["CF-Connecting-IP"].ToString(), 45);
+                Put("SecChUa", request.Headers["Sec-CH-UA"].ToString(), 500);
+                Put("SecChUaMobile", request.Headers["Sec-CH-UA-Mobile"].ToString(), 64);
+                Put("SecChUaPlatform", request.Headers["Sec-CH-UA-Platform"].ToString(), 128);
+                Put("RequestHost", request.Host.Value, 255);
+                Put("RequestPath", request.Path.Value, 500);
+                Put("RequestMethod", request.Method, 16);
+                Put("RequestScheme", request.Scheme, 16);
+                if (request.HttpContext.Connection.RemotePort > 0)
+                    o["RemotePort"] = request.HttpContext.Connection.RemotePort.ToString();
+            }
 
-            var secCh = request.Headers["Sec-CH-UA"].ToString();
-            if (!string.IsNullOrWhiteSpace(secCh))
-                o["SecChUa"] = secCh.Length > 500 ? secCh[..500] : secCh;
+            if (additional != null)
+            {
+                foreach (var (key, value) in additional)
+                    Put(key, value);
+            }
 
             if (o.Count == 0) return null;
             return JsonSerializer.Serialize(o);

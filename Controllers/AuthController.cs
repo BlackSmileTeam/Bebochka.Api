@@ -151,6 +151,9 @@ public class AuthController : ControllerBase
         if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(redirectUri))
             return Redirect($"{frontend.TrimEnd('/')}/account?returnUrl={Uri.EscapeDataString(safeReturn)}&vkError=config");
 
+        if (!acceptPersonalDataProcessing)
+            return Redirect($"{frontend.TrimEnd('/')}/account?returnUrl={Uri.EscapeDataString(safeReturn)}&vkError=consent");
+
         var codeVerifier = VkPkceHelper.CreateCodeVerifier();
         var codeChallenge = VkPkceHelper.CreateCodeChallenge(codeVerifier);
         var oauthState = VkPkceHelper.CreateOAuthState();

@@ -25,10 +25,14 @@ public class AuthService : IAuthService
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IHttpClientFactory _httpClientFactory;
 
+    public const string ConsentUserAgreement = "UserAgreement_v1";
     public const string ConsentShopPhoneRegistration = "PersonalDataProcessing_ShopPhoneRegistration_v1";
     public const string ConsentGoogleRegistration = "PersonalDataProcessing_GoogleRegistration_v1";
     public const string ConsentPhoneRegistration = "PersonalDataProcessing_PhoneRegistration_v1";
     public const string ConsentVkRegistration = "PersonalDataProcessing_VkRegistration_v1";
+
+    private const string AgreementDocumentUrl = "https://bebochka.ru/terms";
+    private const string AgreementDocumentVersion = "27.05.2026";
 
     public AuthService(AppDbContext context, IConfiguration configuration, IHttpContextAccessor httpContextAccessor, IHttpClientFactory httpClientFactory)
     {
@@ -139,7 +143,7 @@ public class AuthService : IAuthService
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
 
-        await LogPersonalDataConsentAsync(user.Id, ConsentShopPhoneRegistration);
+        await LogRegistrationConsentsAsync(user.Id, ConsentShopPhoneRegistration, "ShopPhoneRegistration");
 
         return BuildAuthResponse(user);
     }
@@ -196,7 +200,7 @@ public class AuthService : IAuthService
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
-            await LogPersonalDataConsentAsync(user.Id, ConsentGoogleRegistration);
+            await LogRegistrationConsentsAsync(user.Id, ConsentGoogleRegistration, "GoogleOAuth");
         }
         else
         {
@@ -331,7 +335,7 @@ public class AuthService : IAuthService
             _context.Users.Add(user);
             await _context.SaveChangesAsync(cancellationToken);
 
-            await LogPersonalDataConsentAsync(user.Id, ConsentVkRegistration);
+            await LogRegistrationConsentsAsync(user.Id, ConsentVkRegistration, "VkOAuth");
         }
         else
         {
@@ -406,7 +410,7 @@ public class AuthService : IAuthService
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
 
-            await LogPersonalDataConsentAsync(user.Id, ConsentPhoneRegistration);
+            await LogRegistrationConsentsAsync(user.Id, ConsentPhoneRegistration, "PhoneOtp");
         }
         else
         {
@@ -446,13 +450,28 @@ public class AuthService : IAuthService
         await _context.SaveChangesAsync();
     }
 
-    private async Task LogPersonalDataConsentAsync(int userId, string consentKind)
+    private async Task LogRegistrationConsentsAsync(int userId, string personalDataConsentKind, string registrationChannel)
+    {
+        await LogPersonalDataConsentAsync(userId, ConsentUserAgreement, registrationChannel);
+        await LogPersonalDataConsentAsync(userId, personalDataConsentKind, registrationChannel);
+    }
+
+    private async Task LogPersonalDataConsentAsync(int userId, string consentKind, string? registrationChannel = null)
     {
         var http = _httpContextAccessor.HttpContext;
         var req = http?.Request;
         var ua = req?.Headers.UserAgent.ToString();
         if (ua?.Length > 8000)
             ua = ua[..8000];
+
+        var extra = new Dictionary<string, string?>
+        {
+            ["AgreementUrl"] = AgreementDocumentUrl,
+            ["AgreementVersion"] = AgreementDocumentVersion,
+            ["ConsentKind"] = consentKind
+        };
+        if (!string.IsNullOrWhiteSpace(registrationChannel))
+            extra["RegistrationChannel"] = registrationChannel;
 
         var log = new PersonalDataConsentLog
         {
@@ -462,7 +481,7 @@ public class AuthService : IAuthService
             IpAddress = ClientInfoHelper.GetClientIpAddress(http),
             UserAgent = string.IsNullOrEmpty(ua) ? null : ua,
             DeviceType = ClientInfoHelper.ClassifyDevice(ua),
-            ExtraJson = ClientInfoHelper.BuildExtraJson(req)
+            ExtraJson = ClientInfoHelper.BuildExtraJson(req, extra)
         };
 
         _context.PersonalDataConsentLogs.Add(log);
