@@ -232,6 +232,7 @@ builder.Services.AddAuthorization();
         // Add background services
         builder.Services.AddHostedService<ProductPublicationService>();
         builder.Services.AddHostedService<AnnouncementService>();
+        builder.Services.AddHostedService<CartRetentionService>();
 
 var app = builder.Build();
 
