@@ -275,6 +275,14 @@ public class UsersController : ControllerBase
         if (user == null)
             return NotFound();
 
+        // Consent logs reference Users with ON DELETE RESTRICT.
+        // Delete dependent records first to avoid FK violations.
+        var consentLogs = await _context.PersonalDataConsentLogs
+            .Where(x => x.UserId == id)
+            .ToListAsync();
+        if (consentLogs.Count > 0)
+            _context.PersonalDataConsentLogs.RemoveRange(consentLogs);
+
         _context.Users.Remove(user);
         await _context.SaveChangesAsync();
 
