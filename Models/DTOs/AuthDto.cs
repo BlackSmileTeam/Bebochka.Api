@@ -176,6 +176,16 @@ public class UserDto
     /// Администратор (доступ в админку)
     /// </summary>
     public bool IsAdmin { get; set; }
+
+    /// <summary>
+    /// VK user id (числовой id из VK OAuth), если вход через ВКонтакте.
+    /// </summary>
+    public long? VkUserId { get; set; }
+
+    /// <summary>
+    /// Ссылка на профиль VK (https://vk.com/id…).
+    /// </summary>
+    public string? VkProfileUrl { get; set; }
 }
 
 /// <summary>

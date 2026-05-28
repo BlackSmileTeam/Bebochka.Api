@@ -68,16 +68,7 @@ public class UsersController : ControllerBase
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
 
-        return CreatedAtAction(nameof(GetUser), new { id = user.Id }, new UserDto
-        {
-            Id = user.Id,
-            Username = user.Username,
-            Email = user.Email,
-            FullName = user.FullName,
-            CreatedAt = user.CreatedAt,
-            LastLoginAt = user.LastLoginAt,
-            IsAdmin = user.IsAdmin
-        });
+        return CreatedAtAction(nameof(GetUser), new { id = user.Id }, MapToUserDto(user));
     }
 
     /// <summary>
@@ -90,20 +81,9 @@ public class UsersController : ControllerBase
     {
         var users = await _context.Users
             .OrderBy(u => u.Username)
-            .Select(u => new UserDto
-            {
-                Id = u.Id,
-                Username = u.Username,
-                Email = u.Email,
-                Phone = u.Phone,
-                FullName = u.FullName,
-                CreatedAt = u.CreatedAt,
-                LastLoginAt = u.LastLoginAt,
-                IsAdmin = u.IsAdmin
-            })
             .ToListAsync();
 
-        return Ok(users);
+        return Ok(users.Select(MapToUserDto).ToList());
     }
 
     /// <summary>
@@ -150,17 +130,27 @@ public class UsersController : ControllerBase
         if (user == null)
             return NotFound();
 
-        return Ok(new UserDto
-        {
-            Id = user.Id,
-            Username = user.Username,
-            Email = user.Email,
-            Phone = user.Phone,
-            FullName = user.FullName,
-            CreatedAt = user.CreatedAt,
-            LastLoginAt = user.LastLoginAt,
-            IsAdmin = user.IsAdmin
-        });
+        return Ok(MapToUserDto(user));
+    }
+
+    private static UserDto MapToUserDto(User user) => new()
+    {
+        Id = user.Id,
+        Username = user.Username,
+        Email = user.Email,
+        Phone = user.Phone,
+        FullName = user.FullName,
+        CreatedAt = user.CreatedAt,
+        LastLoginAt = user.LastLoginAt,
+        IsAdmin = user.IsAdmin,
+        VkUserId = user.VkUserId,
+        VkProfileUrl = BuildVkProfileUrl(user.VkUserId)
+    };
+
+    private static string? BuildVkProfileUrl(long? vkUserId)
+    {
+        if (vkUserId is not > 0) return null;
+        return $"https://vk.com/id{vkUserId.Value}";
     }
 
     /// <summary>
