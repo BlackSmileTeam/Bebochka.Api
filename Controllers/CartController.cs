@@ -55,6 +55,9 @@ public class CartController : ControllerBase
         public int? UserId { get; set; }
         public string? SessionId { get; set; }
         public DateTime UpdatedAt { get; set; }
+        public string? CustomerName { get; set; }
+        public long? VkUserId { get; set; }
+        public string? VkProfileUrl { get; set; }
     }
 
     public class QueueItemDto
@@ -117,22 +120,33 @@ public class CartController : ControllerBase
     {
         var items = await _context.CartItems
             .Include(c => c.Product)
+            .Include(c => c.User)
             .OrderByDescending(c => c.UpdatedAt)
-            .Select(c => new AdminCartItemDto
+            .ToListAsync();
+
+        var result = items.Select(c =>
+        {
+            var vkUserId = c.User?.VkUserId;
+            return new AdminCartItemDto
             {
                 Id = c.Id,
                 ProductId = c.ProductId,
-                ProductName = c.Product != null ? c.Product.Name : "—",
-                ProductBrand = c.Product != null ? c.Product.Brand : null,
-                ProductImages = c.Product != null ? (c.Product.Images ?? new List<string>()) : new List<string>(),
+                ProductName = c.Product?.Name ?? "—",
+                ProductBrand = c.Product?.Brand,
+                ProductImages = c.Product?.Images ?? new List<string>(),
                 Quantity = c.Quantity,
                 UserId = c.UserId,
                 SessionId = c.SessionId,
-                UpdatedAt = c.UpdatedAt
-            })
-            .ToListAsync();
+                UpdatedAt = c.UpdatedAt,
+                CustomerName = c.User != null
+                    ? (c.User.FullName ?? c.User.Username)
+                    : null,
+                VkUserId = vkUserId,
+                VkProfileUrl = vkUserId is > 0 ? $"https://vk.com/id{vkUserId.Value}" : null
+            };
+        }).ToList();
 
-        return Ok(items);
+        return Ok(result);
     }
 
     /// <summary>
