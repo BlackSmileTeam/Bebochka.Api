@@ -112,6 +112,7 @@ public class AppDbContext : DbContext
             entity.Property(e => e.TelegramMessageId);
             entity.Property(e => e.TelegramChatId).HasMaxLength(50);
             entity.Property(e => e.BoxNumber).HasMaxLength(50);
+            entity.Property(e => e.Owner).HasMaxLength(50);
             entity.Property(e => e.IncomingShipmentId);
             entity.HasIndex(e => e.PublishedAt);
             entity.HasIndex(e => new { e.TelegramChatId, e.TelegramMessageId });

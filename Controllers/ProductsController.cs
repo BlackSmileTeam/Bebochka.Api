@@ -307,6 +307,10 @@ public class ProductsController : ControllerBase
 
             return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
         }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
         catch (DbUpdateException ex) when ((ex.InnerException?.Message ?? ex.Message).Contains("FK_Products_IncomingShipments", StringComparison.OrdinalIgnoreCase))
         {
             Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] FK validation error: {ex.Message}");
@@ -431,6 +435,10 @@ public class ProductsController : ControllerBase
             }
 
             return Ok(product);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
         catch (DbUpdateException ex) when ((ex.InnerException?.Message ?? ex.Message).Contains("FK_Products_IncomingShipments", StringComparison.OrdinalIgnoreCase))
         {

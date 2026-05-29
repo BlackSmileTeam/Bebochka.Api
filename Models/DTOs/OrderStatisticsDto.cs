@@ -5,6 +5,7 @@ public class OrderStatisticsDto
     public int TotalOrders { get; set; }
     public int FormingOrders { get; set; }
     public int AwaitingPaymentOrders { get; set; }
+    public int CollectingOrders { get; set; }
     public int PendingOrders { get; set; }
     public int OnDeliveryOrders { get; set; }
     public int SentOrders { get; set; }

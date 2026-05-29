@@ -11,6 +11,12 @@ namespace Bebochka.Api.Services;
 /// </summary>
 public class ProductService : IProductService
 {
+    private static readonly HashSet<string> AllowedOwners = new(StringComparer.Ordinal)
+    {
+        "Аня",
+        "Даша",
+    };
+
     private readonly AppDbContext _context;
 
     /// <summary>
@@ -106,6 +112,8 @@ public class ProductService : IProductService
     /// <returns>Created product</returns>
     public async Task<ProductDto> CreateProductAsync(CreateProductDto dto, List<string> imagePaths)
     {
+        var normalizedOwner = NormalizeOwnerOrThrow(dto.Owner);
+
         // PublishedAt from frontend is already in Moscow time format, store it directly
         var product = new Product
         {
@@ -122,6 +130,7 @@ public class ProductService : IProductService
             PublishedAt = dto.PublishedAt, // Store as Moscow time directly
             CartAvailableAt = dto.CartAvailableAt,
             BoxNumber = dto.BoxNumber,
+            Owner = normalizedOwner,
             IncomingShipmentId = dto.IncomingShipmentId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -144,6 +153,7 @@ public class ProductService : IProductService
     {
         var product = await _context.Products.FindAsync(id);
         if (product == null) return null;
+        var normalizedOwner = NormalizeOwnerOrThrow(dto.Owner);
 
         // Only update fields that are provided in DTO (non-empty/non-null)
         // For PublishProduct, we only want to update PublishedAt, so we check if other fields are set
@@ -204,6 +214,8 @@ public class ProductService : IProductService
         }
         if (dto.BoxNumber != null)
             product.BoxNumber = dto.BoxNumber;
+        if (dto.Owner != null)
+            product.Owner = normalizedOwner;
         product.IncomingShipmentId = dto.IncomingShipmentId;
         product.UpdatedAt = DateTime.UtcNow;
 
@@ -274,10 +286,21 @@ public class ProductService : IProductService
             CartAvailableAt = product.CartAvailableAt,
             CartUnlocked = cartUnlocked,
             BoxNumber = product.BoxNumber,
+            Owner = product.Owner,
             IncomingShipmentId = product.IncomingShipmentId,
             CreatedAt = product.CreatedAt,
             UpdatedAt = product.UpdatedAt
         };
+    }
+
+    private static string? NormalizeOwnerOrThrow(string? owner)
+    {
+        if (owner == null) return null;
+        var normalized = owner.Trim();
+        if (normalized.Length == 0) return null;
+        if (!AllowedOwners.Contains(normalized))
+            throw new InvalidOperationException($"Недопустимое значение владельца: {normalized}");
+        return normalized;
     }
     
     /// <summary>

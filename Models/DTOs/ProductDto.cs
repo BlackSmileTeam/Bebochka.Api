@@ -92,6 +92,7 @@ public class ProductDto
     public bool CartUnlocked { get; set; } = true;
 
     public string? BoxNumber { get; set; }
+    public string? Owner { get; set; }
     public int? IncomingShipmentId { get; set; }
     public string? IncomingShipmentName { get; set; }
 }
@@ -163,6 +164,7 @@ public class CreateProductDto
     public DateTime? CartAvailableAt { get; set; }
 
     public string? BoxNumber { get; set; }
+    public string? Owner { get; set; }
     public int? IncomingShipmentId { get; set; }
 }
 
@@ -238,5 +240,6 @@ public class UpdateProductDto
     public DateTime? CartAvailableAt { get; set; }
 
     public string? BoxNumber { get; set; }
+    public string? Owner { get; set; }
     public int? IncomingShipmentId { get; set; }
 }

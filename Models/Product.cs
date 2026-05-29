@@ -131,6 +131,11 @@ public class Product
     public string? BoxNumber { get; set; }
 
     /// <summary>
+    /// System owner of the item (admin-only field), e.g. Аня or Даша.
+    /// </summary>
+    public string? Owner { get; set; }
+
+    /// <summary>
     /// Gets or sets incoming shipment identifier from which product arrived.
     /// </summary>
     public int? IncomingShipmentId { get; set; }

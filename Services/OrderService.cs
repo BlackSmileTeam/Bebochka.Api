@@ -20,7 +20,7 @@ public class OrderService : IOrderService
 
     private static readonly string[] AdminSelectableStatuses =
     {
-        "Формирование заказа", "Ожидает оплату", "Оплачен", "В сборке", "На доставку", "Отправлен", "Отменен"
+        "Формирование заказа", "Ожидает оплату", "Копим", "Оплачен", "В сборке", "На доставку", "Отправлен", "Отменен"
     };
 
     private readonly AppDbContext _context;
@@ -369,6 +369,7 @@ public class OrderService : IOrderService
             {
                 "Формирование заказа" => "формирование заказа",
                 "Ожидает оплату" => "ожидает оплату",
+                "Копим" => "копим",
                 "Оплачен" => "оплачен",
                 "В сборке" => "в сборке",
                 "На доставку" => "на доставку",
@@ -433,6 +434,7 @@ public class OrderService : IOrderService
             TotalOrders = orders.Count,
             FormingOrders = orders.Count(o => o.Status == "Формирование заказа"),
             AwaitingPaymentOrders = orders.Count(o => o.Status == "Ожидает оплату"),
+            CollectingOrders = orders.Count(o => o.Status == "Копим"),
             PendingOrders = orders.Count(o => o.Status == "В сборке"),
             OnDeliveryOrders = orders.Count(o => o.Status == "На доставку"),
             SentOrders = orders.Count(o => o.Status == "Отправлен"),
