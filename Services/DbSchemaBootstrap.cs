@@ -19,6 +19,8 @@ public static class DbSchemaBootstrap
             await EnsureTelegramErrorsTableAsync(db, logger, ct);
             await EnsurePersonalDataConsentLogsTableAsync(db, logger, ct);
             await EnsureMiscExpensesNullableShipmentAsync(db, logger, ct);
+            await EnsureUserChildrenAndReferralsTablesAsync(db, logger, ct);
+            await EnsureUserChildrenClothingSizeWidthAsync(db, logger, ct);
         }
         catch (Exception ex)
         {
@@ -211,6 +213,161 @@ public static class DbSchemaBootstrap
         }
 
         logger.LogInformation("Migration applied: misc expenses can exist without shipment");
+    }
+
+    private static async Task EnsureUserChildrenAndReferralsTablesAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var usersTable = await ScalarStringAsync(db,
+            """
+            SELECT TABLE_NAME
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'users'
+            LIMIT 1
+            """, ct);
+
+        if (string.IsNullOrEmpty(usersTable))
+        {
+            logger.LogWarning("Table users not found, skip userchildren/referrals creation");
+            return;
+        }
+
+        await EnsureTableAsync(db, logger, "userchildren",
+            $"""
+             CREATE TABLE UserChildren (
+               Id INT AUTO_INCREMENT PRIMARY KEY,
+               UserId INT NOT NULL,
+               Name VARCHAR(100) NOT NULL,
+               DateOfBirth DATE NOT NULL,
+               ClothingSize VARCHAR(100) NOT NULL,
+               Gender VARCHAR(20) NOT NULL,
+               CreatedAt DATETIME NOT NULL,
+               UpdatedAt DATETIME NOT NULL,
+               INDEX IX_UserChildren_UserId (UserId),
+               CONSTRAINT FK_UserChildren_Users FOREIGN KEY (UserId) REFERENCES `{usersTable}` (Id) ON DELETE CASCADE
+             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+             """, ct);
+
+        await EnsureTableAsync(db, logger, "referralcodes",
+            $"""
+             CREATE TABLE ReferralCodes (
+               Id INT AUTO_INCREMENT PRIMARY KEY,
+               UserId INT NOT NULL,
+               Code VARCHAR(32) NOT NULL,
+               IsActive TINYINT(1) NOT NULL DEFAULT 1,
+               CreatedAt DATETIME NOT NULL,
+               UNIQUE KEY uk_referralcodes_code (Code),
+               UNIQUE KEY uk_referralcodes_user (UserId),
+               CONSTRAINT FK_ReferralCodes_Users FOREIGN KEY (UserId) REFERENCES `{usersTable}` (Id) ON DELETE CASCADE
+             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+             """, ct);
+
+        var ordersTable = await ScalarStringAsync(db,
+            """
+            SELECT TABLE_NAME
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'orders'
+            LIMIT 1
+            """, ct);
+
+        var firstOrderFk = string.IsNullOrEmpty(ordersTable)
+            ? string.Empty
+            : $", CONSTRAINT FK_Referrals_FirstOrders FOREIGN KEY (FirstOrderId) REFERENCES `{ordersTable}` (Id) ON DELETE SET NULL";
+
+        await EnsureTableAsync(db, logger, "referrals",
+            $"""
+             CREATE TABLE Referrals (
+               Id INT AUTO_INCREMENT PRIMARY KEY,
+               ReferrerUserId INT NOT NULL,
+               ReferredUserId INT NULL,
+               ReferralCodeId INT NOT NULL,
+               Status VARCHAR(30) NOT NULL DEFAULT 'Pending',
+               CreatedAt DATETIME NOT NULL,
+               RegisteredAt DATETIME NULL,
+               FirstOrderId INT NULL,
+               RewardGrantedAt DATETIME NULL,
+               ReferrerRewardAmount DECIMAL(10,2) NULL,
+               ReferredRewardAmount DECIMAL(10,2) NULL,
+               INDEX IX_Referrals_ReferrerUserId (ReferrerUserId),
+               INDEX IX_Referrals_ReferredUserId (ReferredUserId),
+               INDEX IX_Referrals_ReferralCodeId (ReferralCodeId),
+               INDEX IX_Referrals_Status (Status),
+               CONSTRAINT FK_Referrals_ReferrerUsers FOREIGN KEY (ReferrerUserId) REFERENCES `{usersTable}` (Id) ON DELETE RESTRICT,
+               CONSTRAINT FK_Referrals_ReferredUsers FOREIGN KEY (ReferredUserId) REFERENCES `{usersTable}` (Id) ON DELETE SET NULL,
+               CONSTRAINT FK_Referrals_ReferralCodes FOREIGN KEY (ReferralCodeId) REFERENCES ReferralCodes (Id) ON DELETE RESTRICT
+               {firstOrderFk}
+             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+             """, ct);
+    }
+
+    private static async Task EnsureUserChildrenClothingSizeWidthAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var tableName = await ScalarStringAsync(db,
+            """
+            SELECT TABLE_NAME
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'userchildren'
+            LIMIT 1
+            """, ct);
+
+        if (string.IsNullOrEmpty(tableName))
+            return;
+
+        var maxLen = await ScalarIntAsync(db,
+            $"""
+             SELECT CHARACTER_MAXIMUM_LENGTH
+             FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = '{tableName}'
+               AND COLUMN_NAME = 'ClothingSize'
+             LIMIT 1
+             """, ct);
+
+        if (maxLen >= 100)
+        {
+            logger.LogInformation("UserChildren.ClothingSize already wide enough ({Len})", maxLen);
+            return;
+        }
+
+        logger.LogWarning("Widening {Table}.ClothingSize to VARCHAR(100)", tableName);
+        await db.Database.ExecuteSqlRawAsync(
+            $"ALTER TABLE `{tableName}` MODIFY COLUMN ClothingSize VARCHAR(100) NOT NULL",
+            ct);
+        logger.LogInformation("UserChildren.ClothingSize widened");
+    }
+
+    private static async Task EnsureTableAsync(
+        AppDbContext db,
+        ILogger logger,
+        string tableNameLower,
+        string createSql,
+        CancellationToken ct)
+    {
+        var exists = await ScalarIntAsync(db,
+            $"""
+             SELECT COUNT(*)
+             FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND LOWER(TABLE_NAME) = '{tableNameLower}'
+             """, ct);
+
+        if (exists > 0)
+        {
+            logger.LogInformation("Table {Table} already exists", tableNameLower);
+            return;
+        }
+
+        logger.LogWarning("Creating table {Table}", tableNameLower);
+        await db.Database.ExecuteSqlRawAsync(createSql, ct);
+        logger.LogInformation("Table {Table} created", tableNameLower);
     }
 
     private static async Task<string?> ScalarStringAsync(AppDbContext db, string sql, CancellationToken ct)

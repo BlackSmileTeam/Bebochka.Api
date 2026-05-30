@@ -138,7 +138,8 @@ public class AuthService : IAuthService
             FullName = string.IsNullOrWhiteSpace(dto.FullName) ? null : dto.FullName.Trim(),
             IsActive = true,
             IsAdmin = false,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            LastLoginAt = DateTime.UtcNow
         };
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
@@ -195,7 +196,8 @@ public class AuthService : IAuthService
                 GoogleSub = sub,
                 IsActive = true,
                 IsAdmin = false,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                LastLoginAt = DateTime.UtcNow
             };
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
@@ -330,7 +332,8 @@ public class AuthService : IAuthService
                 VkUserId = vkUserId,
                 IsActive = true,
                 IsAdmin = false,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                LastLoginAt = DateTime.UtcNow
             };
             _context.Users.Add(user);
             await _context.SaveChangesAsync(cancellationToken);
@@ -405,7 +408,8 @@ public class AuthService : IAuthService
                 Phone = phone,
                 IsActive = true,
                 IsAdmin = false,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                LastLoginAt = DateTime.UtcNow
             };
             _context.Users.Add(user);
             await _context.SaveChangesAsync();

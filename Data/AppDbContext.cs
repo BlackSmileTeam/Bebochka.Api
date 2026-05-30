@@ -75,6 +75,12 @@ public class AppDbContext : DbContext
     /// Аудит согласий на обработку персональных данных
     /// </summary>
     public DbSet<PersonalDataConsentLog> PersonalDataConsentLogs { get; set; }
+
+    public DbSet<UserChild> UserChildren { get; set; }
+
+    public DbSet<ReferralCode> ReferralCodes { get; set; }
+
+    public DbSet<Referral> Referrals { get; set; }
     public DbSet<IncomingShipment> IncomingShipments { get; set; }
     public DbSet<IncomingShipmentExpense> IncomingShipmentExpenses { get; set; }
 
@@ -348,6 +354,60 @@ public class AppDbContext : DbContext
             entity.HasOne(e => e.IncomingShipment)
                 .WithMany()
                 .HasForeignKey(e => e.IncomingShipmentId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<UserChild>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.DateOfBirth).HasColumnType("date");
+            entity.Property(e => e.ClothingSize).IsRequired().HasMaxLength(100);
+            entity.Property(e => e.Gender).IsRequired().HasMaxLength(20);
+            entity.HasIndex(e => e.UserId);
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ReferralCode>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Code).IsRequired().HasMaxLength(32);
+            entity.HasIndex(e => e.Code).IsUnique();
+            entity.HasIndex(e => e.UserId).IsUnique();
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Referral>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status).IsRequired().HasMaxLength(30).HasDefaultValue("Pending");
+            entity.Property(e => e.ReferrerRewardAmount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.ReferredRewardAmount).HasColumnType("decimal(10,2)");
+            entity.HasIndex(e => e.ReferrerUserId);
+            entity.HasIndex(e => e.ReferredUserId);
+            entity.HasIndex(e => e.ReferralCodeId);
+            entity.HasIndex(e => e.Status);
+            entity.HasOne(e => e.ReferrerUser)
+                .WithMany()
+                .HasForeignKey(e => e.ReferrerUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReferredUser)
+                .WithMany()
+                .HasForeignKey(e => e.ReferredUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(e => e.ReferralCode)
+                .WithMany()
+                .HasForeignKey(e => e.ReferralCodeId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FirstOrder)
+                .WithMany()
+                .HasForeignKey(e => e.FirstOrderId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
     }
