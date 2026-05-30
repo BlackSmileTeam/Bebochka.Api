@@ -33,4 +33,11 @@ public class MyProfileDto
     public string? FullName { get; set; }
     public string? Email { get; set; }
     public string? Phone { get; set; }
+    public bool HasVkLogin { get; set; }
+}
+
+public class ChangeMyPasswordDto
+{
+    public string CurrentPassword { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
 }

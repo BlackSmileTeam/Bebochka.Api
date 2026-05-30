@@ -18,10 +18,12 @@ namespace Bebochka.Api.Controllers;
 public class ProfileController : ControllerBase
 {
     private readonly AppDbContext _context;
+    private readonly ILogger<ProfileController> _logger;
 
-    public ProfileController(AppDbContext context)
+    public ProfileController(AppDbContext context, ILogger<ProfileController> logger)
     {
         _context = context;
+        _logger = logger;
     }
 
     [HttpGet("me")]
@@ -69,6 +71,31 @@ public class ProfileController : ControllerBase
         return Ok(MapProfile(user));
     }
 
+    [HttpPut("me/password")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult> ChangeMyPassword([FromBody] ChangeMyPasswordDto dto)
+    {
+        var user = await GetCurrentUserAsync();
+        if (user == null) return Unauthorized();
+
+        if (user.VkUserId != null)
+            return BadRequest(new { message = "Смена пароля недоступна для входа через VK" });
+
+        if (string.IsNullOrWhiteSpace(dto.CurrentPassword))
+            return BadRequest(new { message = "Укажите текущий пароль" });
+
+        if (string.IsNullOrWhiteSpace(dto.NewPassword) || dto.NewPassword.Length < 6)
+            return BadRequest(new { message = "Новый пароль должен быть не короче 6 символов" });
+
+        if (!BCrypt.Net.BCrypt.Verify(dto.CurrentPassword, user.PasswordHash))
+            return BadRequest(new { message = "Неверный текущий пароль" });
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
+        await _context.SaveChangesAsync();
+        return Ok(new { message = "Пароль изменён" });
+    }
+
     [HttpGet("children")]
     [ProducesResponseType(typeof(List<UserChildDto>), StatusCodes.Status200OK)]
     public async Task<ActionResult<List<UserChildDto>>> GetMyChildren()
@@ -102,14 +129,23 @@ public class ProfileController : ControllerBase
             UserId = userId.Value,
             Name = dto.Name.Trim(),
             DateOfBirth = dto.DateOfBirth.Date,
-            ClothingSize = dto.ClothingSize.Trim(),
+            ClothingSize = NormalizeClothingSize(dto.ClothingSize),
             Gender = dto.Gender.Trim().ToLowerInvariant(),
             CreatedAt = now,
             UpdatedAt = now
         };
 
-        _context.UserChildren.Add(child);
-        await _context.SaveChangesAsync();
+        try
+        {
+            _context.UserChildren.Add(child);
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CreateChild failed for user {UserId}", userId.Value);
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { message = "Не удалось сохранить данные ребёнка. Попробуйте позже или обратитесь в поддержку." });
+        }
 
         return CreatedAtAction(nameof(GetMyChildren), MapChild(child));
     }
@@ -130,11 +166,21 @@ public class ProfileController : ControllerBase
 
         child.Name = dto.Name.Trim();
         child.DateOfBirth = dto.DateOfBirth.Date;
-        child.ClothingSize = dto.ClothingSize.Trim();
+        child.ClothingSize = NormalizeClothingSize(dto.ClothingSize);
         child.Gender = dto.Gender.Trim().ToLowerInvariant();
         child.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync();
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "UpdateChild failed for user {UserId}, child {ChildId}", userId.Value, id);
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { message = "Не удалось сохранить данные ребёнка. Попробуйте позже или обратитесь в поддержку." });
+        }
+
         return Ok(MapChild(child));
     }
 
@@ -174,7 +220,8 @@ public class ProfileController : ControllerBase
         Username = user.Username,
         FullName = user.FullName,
         Email = user.Email,
-        Phone = user.Phone
+        Phone = user.Phone,
+        HasVkLogin = user.VkUserId != null
     };
 
     private static UserChildDto MapChild(UserChild c) => new()
@@ -193,11 +240,25 @@ public class ProfileController : ControllerBase
         if (string.IsNullOrWhiteSpace(dto.Name)) return "Укажите имя ребёнка";
         if (dto.Name.Trim().Length > 100) return "Имя слишком длинное";
         if (string.IsNullOrWhiteSpace(dto.ClothingSize)) return "Укажите размер одежды";
-        if (dto.ClothingSize.Trim().Length > 100) return "Слишком много размеров";
+        var normalizedSize = NormalizeClothingSize(dto.ClothingSize);
+        if (string.IsNullOrEmpty(normalizedSize)) return "Укажите размер одежды";
+        if (normalizedSize.Length > 100) return "Слишком много размеров";
         var gender = dto.Gender?.Trim().ToLowerInvariant() ?? "";
         if (gender is not ("мальчик" or "девочка")) return "Укажите пол: мальчик или девочка";
         if (dto.DateOfBirth.Date > DateTime.UtcNow.Date) return "Дата рождения не может быть в будущем";
         return null;
+    }
+
+    private static string NormalizeClothingSize(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return string.Empty;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var list = new List<string>();
+        foreach (var part in raw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (seen.Add(part)) list.Add(part);
+        }
+        return string.Join(",", list);
     }
 
     private static string? NormalizePhoneRu(string? raw)
