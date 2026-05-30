@@ -14,13 +14,18 @@ public static class DbSchemaBootstrap
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var logger = scope.ServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger("DbSchemaBootstrap");
 
+        var dbName = await ScalarStringAsync(db, "SELECT DATABASE()", ct);
+        logger.LogInformation("DbSchemaBootstrap starting (database: {Database})", dbName ?? "?");
+
         try
         {
+            await EnsureUserChildrenTableAsync(db, logger, ct);
             await EnsureTelegramErrorsTableAsync(db, logger, ct);
             await EnsurePersonalDataConsentLogsTableAsync(db, logger, ct);
             await EnsureMiscExpensesNullableShipmentAsync(db, logger, ct);
-            await EnsureUserChildrenAndReferralsTablesAsync(db, logger, ct);
+            await EnsureReferralTablesAsync(db, logger, ct);
             await EnsureUserChildrenClothingSizeWidthAsync(db, logger, ct);
+            logger.LogInformation("DbSchemaBootstrap completed");
         }
         catch (Exception ex)
         {
@@ -215,7 +220,7 @@ public static class DbSchemaBootstrap
         logger.LogInformation("Migration applied: misc expenses can exist without shipment");
     }
 
-    private static async Task EnsureUserChildrenAndReferralsTablesAsync(
+    private static async Task EnsureUserChildrenTableAsync(
         AppDbContext db,
         ILogger logger,
         CancellationToken ct)
@@ -231,13 +236,28 @@ public static class DbSchemaBootstrap
 
         if (string.IsNullOrEmpty(usersTable))
         {
-            logger.LogWarning("Table users not found, skip userchildren/referrals creation");
+            logger.LogWarning("Table users not found, skip userchildren creation");
             return;
         }
 
-        await EnsureTableAsync(db, logger, "userchildren",
+        var exists = await ScalarIntAsync(db,
+            """
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'userchildren'
+            """, ct);
+
+        if (exists > 0)
+        {
+            logger.LogInformation("Table userchildren already exists");
+            return;
+        }
+
+        logger.LogWarning("Creating table userchildren");
+        await db.Database.ExecuteSqlRawAsync(
             $"""
-             CREATE TABLE UserChildren (
+             CREATE TABLE IF NOT EXISTS userchildren (
                Id INT AUTO_INCREMENT PRIMARY KEY,
                UserId INT NOT NULL,
                Name VARCHAR(100) NOT NULL,
@@ -250,58 +270,102 @@ public static class DbSchemaBootstrap
                CONSTRAINT FK_UserChildren_Users FOREIGN KEY (UserId) REFERENCES `{usersTable}` (Id) ON DELETE CASCADE
              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
              """, ct);
+        logger.LogInformation("Table userchildren created");
+    }
 
-        await EnsureTableAsync(db, logger, "referralcodes",
-            $"""
-             CREATE TABLE ReferralCodes (
-               Id INT AUTO_INCREMENT PRIMARY KEY,
-               UserId INT NOT NULL,
-               Code VARCHAR(32) NOT NULL,
-               IsActive TINYINT(1) NOT NULL DEFAULT 1,
-               CreatedAt DATETIME NOT NULL,
-               UNIQUE KEY uk_referralcodes_code (Code),
-               UNIQUE KEY uk_referralcodes_user (UserId),
-               CONSTRAINT FK_ReferralCodes_Users FOREIGN KEY (UserId) REFERENCES `{usersTable}` (Id) ON DELETE CASCADE
-             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-             """, ct);
+    private static async Task EnsureReferralTablesAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        try
+        {
+            var usersTable = await ScalarStringAsync(db,
+                """
+                SELECT TABLE_NAME
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND LOWER(TABLE_NAME) = 'users'
+                LIMIT 1
+                """, ct);
 
-        var ordersTable = await ScalarStringAsync(db,
-            """
-            SELECT TABLE_NAME
-            FROM information_schema.TABLES
-            WHERE TABLE_SCHEMA = DATABASE()
-              AND LOWER(TABLE_NAME) = 'orders'
-            LIMIT 1
-            """, ct);
+            if (string.IsNullOrEmpty(usersTable))
+            {
+                logger.LogWarning("Table users not found, skip referral tables creation");
+                return;
+            }
 
-        var firstOrderFk = string.IsNullOrEmpty(ordersTable)
-            ? string.Empty
-            : $", CONSTRAINT FK_Referrals_FirstOrders FOREIGN KEY (FirstOrderId) REFERENCES `{ordersTable}` (Id) ON DELETE SET NULL";
+            await EnsureTableAsync(db, logger, "referralcodes",
+                $"""
+                 CREATE TABLE IF NOT EXISTS referralcodes (
+                   Id INT AUTO_INCREMENT PRIMARY KEY,
+                   UserId INT NOT NULL,
+                   Code VARCHAR(32) NOT NULL,
+                   IsActive TINYINT(1) NOT NULL DEFAULT 1,
+                   CreatedAt DATETIME NOT NULL,
+                   UNIQUE KEY uk_referralcodes_code (Code),
+                   UNIQUE KEY uk_referralcodes_user (UserId),
+                   CONSTRAINT FK_ReferralCodes_Users FOREIGN KEY (UserId) REFERENCES `{usersTable}` (Id) ON DELETE CASCADE
+                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                 """, ct);
 
-        await EnsureTableAsync(db, logger, "referrals",
-            $"""
-             CREATE TABLE Referrals (
-               Id INT AUTO_INCREMENT PRIMARY KEY,
-               ReferrerUserId INT NOT NULL,
-               ReferredUserId INT NULL,
-               ReferralCodeId INT NOT NULL,
-               Status VARCHAR(30) NOT NULL DEFAULT 'Pending',
-               CreatedAt DATETIME NOT NULL,
-               RegisteredAt DATETIME NULL,
-               FirstOrderId INT NULL,
-               RewardGrantedAt DATETIME NULL,
-               ReferrerRewardAmount DECIMAL(10,2) NULL,
-               ReferredRewardAmount DECIMAL(10,2) NULL,
-               INDEX IX_Referrals_ReferrerUserId (ReferrerUserId),
-               INDEX IX_Referrals_ReferredUserId (ReferredUserId),
-               INDEX IX_Referrals_ReferralCodeId (ReferralCodeId),
-               INDEX IX_Referrals_Status (Status),
-               CONSTRAINT FK_Referrals_ReferrerUsers FOREIGN KEY (ReferrerUserId) REFERENCES `{usersTable}` (Id) ON DELETE RESTRICT,
-               CONSTRAINT FK_Referrals_ReferredUsers FOREIGN KEY (ReferredUserId) REFERENCES `{usersTable}` (Id) ON DELETE SET NULL,
-               CONSTRAINT FK_Referrals_ReferralCodes FOREIGN KEY (ReferralCodeId) REFERENCES ReferralCodes (Id) ON DELETE RESTRICT
-               {firstOrderFk}
-             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-             """, ct);
+            var referralCodesTable = await ScalarStringAsync(db,
+                """
+                SELECT TABLE_NAME
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND LOWER(TABLE_NAME) = 'referralcodes'
+                LIMIT 1
+                """, ct);
+
+            if (string.IsNullOrEmpty(referralCodesTable))
+            {
+                logger.LogWarning("Table referralcodes not found after create attempt, skip referrals");
+                return;
+            }
+
+            var ordersTable = await ScalarStringAsync(db,
+                """
+                SELECT TABLE_NAME
+                FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND LOWER(TABLE_NAME) = 'orders'
+                LIMIT 1
+                """, ct);
+
+            var firstOrderFk = string.IsNullOrEmpty(ordersTable)
+                ? string.Empty
+                : $", CONSTRAINT FK_Referrals_FirstOrders FOREIGN KEY (FirstOrderId) REFERENCES `{ordersTable}` (Id) ON DELETE SET NULL";
+
+            await EnsureTableAsync(db, logger, "referrals",
+                $"""
+                 CREATE TABLE IF NOT EXISTS referrals (
+                   Id INT AUTO_INCREMENT PRIMARY KEY,
+                   ReferrerUserId INT NOT NULL,
+                   ReferredUserId INT NULL,
+                   ReferralCodeId INT NOT NULL,
+                   Status VARCHAR(30) NOT NULL DEFAULT 'Pending',
+                   CreatedAt DATETIME NOT NULL,
+                   RegisteredAt DATETIME NULL,
+                   FirstOrderId INT NULL,
+                   RewardGrantedAt DATETIME NULL,
+                   ReferrerRewardAmount DECIMAL(10,2) NULL,
+                   ReferredRewardAmount DECIMAL(10,2) NULL,
+                   INDEX IX_Referrals_ReferrerUserId (ReferrerUserId),
+                   INDEX IX_Referrals_ReferredUserId (ReferredUserId),
+                   INDEX IX_Referrals_ReferralCodeId (ReferralCodeId),
+                   INDEX IX_Referrals_Status (Status),
+                   CONSTRAINT FK_Referrals_ReferrerUsers FOREIGN KEY (ReferrerUserId) REFERENCES `{usersTable}` (Id) ON DELETE RESTRICT,
+                   CONSTRAINT FK_Referrals_ReferredUsers FOREIGN KEY (ReferredUserId) REFERENCES `{usersTable}` (Id) ON DELETE SET NULL,
+                   CONSTRAINT FK_Referrals_ReferralCodes FOREIGN KEY (ReferralCodeId) REFERENCES `{referralCodesTable}` (Id) ON DELETE RESTRICT
+                   {firstOrderFk}
+                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                 """, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Referral tables bootstrap skipped (non-critical)");
+        }
     }
 
     private static async Task EnsureUserChildrenClothingSizeWidthAsync(

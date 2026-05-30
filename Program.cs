@@ -236,6 +236,9 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+// Schema bootstrap must run before the app starts serving requests.
+await DbSchemaBootstrap.ApplyAsync(app.Services);
+
 // Configure the HTTP request pipeline
 
 
@@ -307,9 +310,6 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 app.MapControllers();
-
-// Idempotent fixes for production DB (see Database/*.sql for manual runs).
-await DbSchemaBootstrap.ApplyAsync(app.Services);
 
 // Схема задаётся SQL-скриптами (Database/*.sql). EnsureCreated не добавляет таблицы в уже существующую пустую БД — импортируйте full_schema_mysql8.sql и миграции при необходимости.
 
