@@ -108,6 +108,9 @@ public interface IOrderService
     /// </summary>
     Task<OrderCustomerReviewAdminDto> CreateAdminManualReviewAsync(CreateAdminManualReviewDto dto, int adminUserId);
 
+    /// <summary>Редактировать отзыв администратором.</summary>
+    Task<OrderCustomerReviewAdminDto> UpdateAdminManualReviewAsync(int reviewId, UpdateAdminManualReviewDto dto);
+
     /// <summary>Удалить отзыв (и файлы фото с диска при наличии).</summary>
     Task<bool> DeleteCustomerReviewAsync(int reviewId);
 }

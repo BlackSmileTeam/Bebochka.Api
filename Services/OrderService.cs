@@ -891,31 +891,124 @@ public class OrderService : IOrderService
         return MapOrderCustomerReviewToAdminDto(saved);
     }
 
+    public async Task<OrderCustomerReviewAdminDto> UpdateAdminManualReviewAsync(int reviewId, UpdateAdminManualReviewDto dto)
+    {
+        if (dto.Rating < 1 || dto.Rating > 5)
+            throw new InvalidOperationException("Оценка должна быть от 1 до 5");
+
+        var review = await _context.OrderCustomerReviews
+            .Include(r => r.Order)
+            .Include(r => r.User)
+            .FirstOrDefaultAsync(r => r.Id == reviewId)
+            ?? throw new InvalidOperationException("Отзыв не найден");
+
+        var trimmedComment = string.IsNullOrWhiteSpace(dto.Comment) ? null : dto.Comment.Trim();
+        if (trimmedComment != null && trimmedComment.Length > 4000)
+            trimmedComment = trimmedComment[..4000];
+
+        var existingImages = DeserializeReviewImagePaths(review.ReviewImagesJson);
+        var keepUrls = dto.KeepImageUrls ?? existingImages;
+        var keepNormalized = new HashSet<string>(
+            keepUrls.Select(NormalizeReviewImagePath),
+            StringComparer.OrdinalIgnoreCase);
+        var keptImages = existingImages
+            .Where(path => keepNormalized.Contains(NormalizeReviewImagePath(path)))
+            .ToList();
+
+        foreach (var path in existingImages)
+        {
+            if (!keptImages.Contains(path))
+                DeleteReviewImageFile(path);
+        }
+
+        var newPaths = await SaveReviewImagesFromBase64Async(dto.ImagesBase64);
+        var mergedImages = keptImages.Concat(newPaths).ToList();
+
+        if (string.IsNullOrWhiteSpace(trimmedComment) && mergedImages.Count == 0)
+            throw new InvalidOperationException("Добавьте текст отзыва или хотя бы одно фото");
+
+        review.Rating = dto.Rating;
+        review.Comment = trimmedComment;
+        review.ReviewImagesJson = mergedImages.Count > 0 ? JsonSerializer.Serialize(mergedImages) : null;
+
+        if (!string.IsNullOrWhiteSpace(dto.CreatedDate) &&
+            DateOnly.TryParse(dto.CreatedDate.Trim(), CultureInfo.InvariantCulture, out var dOnly))
+            review.CreatedAtUtc = dOnly.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        else if (dto.CreatedAtUtc.HasValue)
+            review.CreatedAtUtc = dto.CreatedAtUtc.Value;
+
+        if (!review.OrderId.HasValue)
+        {
+            var orderNo = dto.OrderNumber?.Trim();
+            if (!string.IsNullOrEmpty(orderNo))
+            {
+                var found = await _context.Orders
+                    .Include(o => o.CustomerReview)
+                    .FirstOrDefaultAsync(o => o.OrderNumber == orderNo);
+                if (found == null)
+                    throw new InvalidOperationException("Заказ с таким номером не найден.");
+                if (found.CustomerReview != null && found.CustomerReview.Id != reviewId)
+                    throw new InvalidOperationException("Отзыв по этому заказу уже существует.");
+                review.OrderId = found.Id;
+                review.ManualCustomerName = null;
+                review.ManualCustomerPhone = null;
+            }
+            else
+            {
+                review.ManualCustomerName = string.IsNullOrWhiteSpace(dto.CustomerName)
+                    ? null
+                    : dto.CustomerName.Trim();
+                review.ManualCustomerPhone = string.IsNullOrWhiteSpace(dto.CustomerPhone)
+                    ? null
+                    : dto.CustomerPhone.Trim();
+            }
+        }
+
+        await _context.SaveChangesAsync();
+
+        var saved = await _context.OrderCustomerReviews
+            .Include(r => r.Order)
+            .Include(r => r.User)
+            .FirstAsync(r => r.Id == reviewId);
+
+        return MapOrderCustomerReviewToAdminDto(saved);
+    }
+
     public async Task<bool> DeleteCustomerReviewAsync(int reviewId)
     {
         var r = await _context.OrderCustomerReviews.FirstOrDefaultAsync(x => x.Id == reviewId);
         if (r == null) return false;
 
         foreach (var path in DeserializeReviewImagePaths(r.ReviewImagesJson))
-        {
-            if (string.IsNullOrWhiteSpace(path) || path.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-                continue;
-            var relative = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
-            var full = Path.Combine(AppPaths.WwwRoot(_environment), relative);
-            try
-            {
-                if (File.Exists(full))
-                    File.Delete(full);
-            }
-            catch
-            {
-                // ignore file errors
-            }
-        }
+            DeleteReviewImageFile(path);
 
         _context.OrderCustomerReviews.Remove(r);
         await _context.SaveChangesAsync();
         return true;
+    }
+
+    private void DeleteReviewImageFile(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            return;
+        var relative = path.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        var full = Path.Combine(AppPaths.WwwRoot(_environment), relative);
+        try
+        {
+            if (File.Exists(full))
+                File.Delete(full);
+        }
+        catch
+        {
+            // ignore file errors
+        }
+    }
+
+    private static string NormalizeReviewImagePath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        var trimmed = path.Trim();
+        return trimmed.StartsWith('/') ? trimmed : $"/{trimmed}";
     }
 
     private const string AbsentDisplay = "Отсутствует";

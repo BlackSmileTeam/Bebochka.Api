@@ -229,6 +229,40 @@ public class OrdersController : ControllerBase
         return Ok(orders);
     }
 
+    /// <summary>
+    /// Редактирование отзыва администратором.
+    /// </summary>
+    [HttpPut("reviews/{id:int}")]
+    [Authorize(Roles = "Admin")]
+    [ProducesResponseType(typeof(OrderCustomerReviewAdminDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<OrderCustomerReviewAdminDto>> UpdateAdminManualReview(
+        int id,
+        [FromBody] UpdateAdminManualReviewDto? dto)
+    {
+        if (dto == null)
+            return BadRequest(new { message = "Тело запроса обязательно" });
+        try
+        {
+            var updated = await _orderService.UpdateAdminManualReviewAsync(id, dto);
+            return Ok(updated);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("не найден"))
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (DbUpdateException)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError,
+                new { message = "Не удалось сохранить отзыв. Проверьте логи и схему БД." });
+        }
+    }
+
     /// <summary>Удалить отзыв (админ).</summary>
     [HttpDelete("reviews/{id:int}")]
     [Authorize(Roles = "Admin")]

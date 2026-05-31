@@ -100,6 +100,23 @@ public class CreateAdminManualReviewDto
 }
 
 /// <summary>
+/// Редактирование отзыва администратором.
+/// </summary>
+public class UpdateAdminManualReviewDto
+{
+    public string? OrderNumber { get; set; }
+    public string? CustomerName { get; set; }
+    public string? CustomerPhone { get; set; }
+    public int Rating { get; set; }
+    public string Comment { get; set; } = string.Empty;
+    public List<string>? ImagesBase64 { get; set; }
+    /// <summary>Существующие пути фото, которые нужно оставить.</summary>
+    public List<string>? KeepImageUrls { get; set; }
+    public DateTime? CreatedAtUtc { get; set; }
+    public string? CreatedDate { get; set; }
+}
+
+/// <summary>
 /// Data transfer object for order item
 /// </summary>
 public class OrderItemDto
