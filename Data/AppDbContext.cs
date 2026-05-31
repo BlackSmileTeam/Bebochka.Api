@@ -375,6 +375,7 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<ReferralCode>(entity =>
         {
+            entity.ToTable("ReferralCodes");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Code).IsRequired().HasMaxLength(32);
             entity.HasIndex(e => e.Code).IsUnique();
@@ -387,6 +388,7 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Referral>(entity =>
         {
+            entity.ToTable("Referrals");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Status).IsRequired().HasMaxLength(30).HasDefaultValue("Pending");
             entity.Property(e => e.ReferrerRewardAmount).HasColumnType("decimal(10,2)");

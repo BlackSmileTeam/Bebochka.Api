@@ -1,9 +1,15 @@
--- Профиль: автофильтр каталога по детям + таблицы реферальной программы.
--- mysql -u USER -p bebochka < Database/migration_profile_autofilter_and_referrals.sql
+-- Реферальная программа: таблицы ReferralCodes и Referrals (PascalCase — как в EF Core).
+-- Идемпотентно — можно запускать повторно.
+--
+-- mysql -u USER -p bebochka < Database/migration_referrals.sql
+--
+-- Проверка после выполнения:
+--   SHOW TABLES LIKE 'Referral%';
+--   DESCRIBE ReferralCodes;
+--   DESCRIBE Referrals;
 
 USE bebochka;
 
--- AutoFilterByChildren на users
 SET @users_tbl := (
   SELECT TABLE_NAME
   FROM information_schema.TABLES
@@ -12,87 +18,7 @@ SET @users_tbl := (
   LIMIT 1
 );
 
-SET @col_exists := (
-  SELECT COUNT(*)
-  FROM information_schema.COLUMNS
-  WHERE TABLE_SCHEMA = DATABASE()
-    AND TABLE_NAME = @users_tbl
-    AND COLUMN_NAME = 'AutoFilterByChildren'
-);
-
-SET @sql := IF(
-  @users_tbl IS NULL,
-  'SELECT ''ERROR: table users not found'' AS Info',
-  IF(
-    @col_exists = 0,
-    CONCAT('ALTER TABLE `', @users_tbl, '` ADD COLUMN AutoFilterByChildren TINYINT(1) NOT NULL DEFAULT 0'),
-    'SELECT ''AutoFilterByChildren already exists'' AS Info'
-  )
-);
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- userchildren (если ещё нет; имя в нижнем регистре для Linux MySQL)
-SET @userchildren_exists := (
-  SELECT COUNT(*)
-  FROM information_schema.TABLES
-  WHERE TABLE_SCHEMA = DATABASE()
-    AND LOWER(TABLE_NAME) = 'userchildren'
-);
-
-SET @sql := IF(
-  @users_tbl IS NULL,
-  'SELECT ''ERROR: table users not found'' AS Info',
-  IF(
-    @userchildren_exists = 0,
-    CONCAT(
-      'CREATE TABLE userchildren (',
-      '  Id INT AUTO_INCREMENT PRIMARY KEY,',
-      '  UserId INT NOT NULL,',
-      '  Name VARCHAR(100) NOT NULL,',
-      '  DateOfBirth DATE NOT NULL,',
-      '  ClothingSize VARCHAR(100) NOT NULL,',
-      '  Gender VARCHAR(20) NOT NULL,',
-      '  CreatedAt DATETIME NOT NULL,',
-      '  UpdatedAt DATETIME NOT NULL,',
-      '  INDEX IX_UserChildren_UserId (UserId),',
-      '  CONSTRAINT FK_userchildren_users FOREIGN KEY (UserId) REFERENCES `', @users_tbl, '` (Id) ON DELETE CASCADE',
-      ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
-    ),
-    'SELECT ''userchildren already exists'' AS Info'
-  )
-);
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- DateOfBirth на users (для проверки возраста ребёнка относительно родителя)
-SET @dob_col_exists := (
-  SELECT COUNT(*)
-  FROM information_schema.COLUMNS
-  WHERE TABLE_SCHEMA = DATABASE()
-    AND TABLE_NAME = @users_tbl
-    AND COLUMN_NAME = 'DateOfBirth'
-);
-
-SET @sql := IF(
-  @users_tbl IS NULL,
-  'SELECT ''ERROR: table users not found'' AS Info',
-  IF(
-    @dob_col_exists = 0,
-    CONCAT('ALTER TABLE `', @users_tbl, '` ADD COLUMN DateOfBirth DATE NULL'),
-    'SELECT ''DateOfBirth already exists'' AS Info'
-  )
-);
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
--- ReferralCodes
+-- ReferralCodes (нужна для POST /api/profile/referral/code)
 SET @referralcodes_exists := (
   SELECT COUNT(*)
   FROM information_schema.TABLES
@@ -125,7 +51,7 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Referrals
+-- Referrals (нужна для GET /api/admin/referrals и применения кода)
 SET @referrals_exists := (
   SELECT COUNT(*)
   FROM information_schema.TABLES
@@ -138,6 +64,14 @@ SET @referralcodes_tbl := (
   FROM information_schema.TABLES
   WHERE TABLE_SCHEMA = DATABASE()
     AND LOWER(TABLE_NAME) = 'referralcodes'
+  LIMIT 1
+);
+
+SET @orders_tbl := (
+  SELECT TABLE_NAME
+  FROM information_schema.TABLES
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND LOWER(TABLE_NAME) = 'orders'
   LIMIT 1
 );
 
@@ -166,6 +100,15 @@ SET @sql := IF(
       '  CONSTRAINT FK_Referrals_ReferrerUsers FOREIGN KEY (ReferrerUserId) REFERENCES `', @users_tbl, '` (Id) ON DELETE RESTRICT,',
       '  CONSTRAINT FK_Referrals_ReferredUsers FOREIGN KEY (ReferredUserId) REFERENCES `', @users_tbl, '` (Id) ON DELETE SET NULL,',
       '  CONSTRAINT FK_Referrals_ReferralCodes FOREIGN KEY (ReferralCodeId) REFERENCES `', @referralcodes_tbl, '` (Id) ON DELETE RESTRICT',
+      IF(
+        @orders_tbl IS NULL,
+        '',
+        CONCAT(
+          ', CONSTRAINT FK_Referrals_FirstOrders FOREIGN KEY (FirstOrderId) REFERENCES `',
+          @orders_tbl,
+          '` (Id) ON DELETE SET NULL'
+        )
+      ),
       ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
     ),
     'SELECT ''Referrals already exists'' AS Info'
@@ -175,3 +118,6 @@ SET @sql := IF(
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+SELECT 'Done. Tables:' AS Info;
+SHOW TABLES LIKE 'Referral%';
