@@ -28,19 +28,22 @@ public class OrderService : IOrderService
     private readonly ITelegramNotificationService _telegramService;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IWebHostEnvironment _environment;
+    private readonly IReferralService _referralService;
 
     public OrderService(
         AppDbContext context,
         IEmailService emailService,
         ITelegramNotificationService telegramService,
         IHttpContextAccessor httpContextAccessor,
-        IWebHostEnvironment environment)
+        IWebHostEnvironment environment,
+        IReferralService referralService)
     {
         _context = context;
         _emailService = emailService;
         _telegramService = telegramService;
         _httpContextAccessor = httpContextAccessor;
         _environment = environment;
+        _referralService = referralService;
     }
 
     public async Task<OrderDto> CreateOrderAsync(CreateOrderDto dto)
@@ -802,6 +805,16 @@ public class OrderService : IOrderService
         }
 
         await _context.SaveChangesAsync();
+
+        try
+        {
+            await _referralService.ProcessOrderReceivedAsync(userId, orderId, GetFinalAmount(order));
+        }
+        catch (Exception ex)
+        {
+            // Non-critical: order already saved
+            Console.WriteLine($"[Referral] ProcessOrderReceived failed for order {orderId}: {ex.Message}");
+        }
 
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
         return MapToDto(order, user, wantReview);

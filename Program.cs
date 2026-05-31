@@ -59,6 +59,7 @@ builder.Services.AddControllers(options =>
 .AddJsonOptions(options =>
 {
     options.JsonSerializerOptions.PropertyNamingPolicy = null; // Сохраняем оригинальные имена свойств
+    options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
 });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -215,6 +216,7 @@ builder.Services.AddAuthorization();
         builder.Services.AddScoped<IAuthService, AuthService>();
         builder.Services.AddScoped<WebReserveQueueService>();
         builder.Services.AddScoped<IOrderService, OrderService>();
+        builder.Services.AddScoped<IReferralService, ReferralService>();
         builder.Services.AddScoped<IEmailService, EmailService>();
         builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
         builder.Services.AddScoped<CollageService>();

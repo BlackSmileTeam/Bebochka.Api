@@ -43,24 +43,62 @@ public class BrandsController : ControllerBase
     /// Creates a new brand (admin only)
     /// </summary>
     [HttpPost]
-    [Authorize]
+    [Authorize(Roles = "Admin")]
     public async Task<ActionResult<Brand>> CreateBrand([FromBody] Brand brand)
     {
-        if (string.IsNullOrWhiteSpace(brand.Name))
-        {
-            return BadRequest(new { message = "Brand name is required" });
-        }
+        var name = brand.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            return BadRequest(new { message = "Укажите название бренда" });
+        if (name.Length > 100)
+            return BadRequest(new { message = "Название слишком длинное" });
 
-        // Check if brand already exists
-        if (await _context.Brands.AnyAsync(b => b.Name == brand.Name))
-        {
-            return BadRequest(new { message = "Brand already exists" });
-        }
+        if (await _context.Brands.AnyAsync(b => b.Name.ToLower() == name.ToLower()))
+            return BadRequest(new { message = "Такой бренд уже существует" });
 
-        _context.Brands.Add(brand);
+        var entity = new Brand { Name = name };
+        _context.Brands.Add(entity);
         await _context.SaveChangesAsync();
 
-        return CreatedAtAction(nameof(GetBrand), new { id = brand.Id }, brand);
+        return CreatedAtAction(nameof(GetBrand), new { id = entity.Id }, entity);
+    }
+
+    /// <summary>
+    /// Updates a brand (admin only)
+    /// </summary>
+    [HttpPut("{id}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<ActionResult<Brand>> UpdateBrand(int id, [FromBody] Brand brand)
+    {
+        var entity = await _context.Brands.FindAsync(id);
+        if (entity == null) return NotFound();
+
+        var name = brand.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            return BadRequest(new { message = "Укажите название бренда" });
+        if (name.Length > 100)
+            return BadRequest(new { message = "Название слишком длинное" });
+
+        if (await _context.Brands.AnyAsync(b => b.Id != id && b.Name.ToLower() == name.ToLower()))
+            return BadRequest(new { message = "Такой бренд уже существует" });
+
+        entity.Name = name;
+        await _context.SaveChangesAsync();
+        return Ok(entity);
+    }
+
+    /// <summary>
+    /// Deletes a brand (admin only)
+    /// </summary>
+    [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin")]
+    public async Task<ActionResult> DeleteBrand(int id)
+    {
+        var entity = await _context.Brands.FindAsync(id);
+        if (entity == null) return NotFound();
+
+        _context.Brands.Remove(entity);
+        await _context.SaveChangesAsync();
+        return NoContent();
     }
 
     /// <summary>

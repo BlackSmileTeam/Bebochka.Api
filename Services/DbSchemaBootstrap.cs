@@ -8,6 +8,9 @@ namespace Bebochka.Api.Services;
 /// </summary>
 public static class DbSchemaBootstrap
 {
+    private static volatile bool _userChildrenSchemaReady;
+    private static readonly SemaphoreSlim UserChildrenSchemaLock = new(1, 1);
+
     public static async Task ApplyAsync(IServiceProvider services, CancellationToken ct = default)
     {
         await using var scope = services.CreateAsyncScope();
@@ -20,17 +23,47 @@ public static class DbSchemaBootstrap
         try
         {
             await EnsureUserChildrenTableAsync(db, logger, ct);
+            await EnsureUserAutoFilterColumnAsync(db, logger, ct);
+            await EnsureUserDateOfBirthColumnAsync(db, logger, ct);
             await EnsureTelegramErrorsTableAsync(db, logger, ct);
             await EnsurePersonalDataConsentLogsTableAsync(db, logger, ct);
             await EnsureMiscExpensesNullableShipmentAsync(db, logger, ct);
             await EnsureReferralTablesAsync(db, logger, ct);
             await EnsureUserChildrenClothingSizeWidthAsync(db, logger, ct);
+            _userChildrenSchemaReady = true;
             logger.LogInformation("DbSchemaBootstrap completed");
         }
         catch (Exception ex)
         {
             logger.LogError(ex, "Schema bootstrap failed");
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Idempotent guard for profile children endpoints (covers prod DB lag after deploy).
+    /// </summary>
+    public static async Task EnsureUserChildrenReadyAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct = default)
+    {
+        if (_userChildrenSchemaReady)
+            return;
+
+        await UserChildrenSchemaLock.WaitAsync(ct);
+        try
+        {
+            if (_userChildrenSchemaReady)
+                return;
+
+            await EnsureUserChildrenTableAsync(db, logger, ct);
+            await EnsureUserChildrenClothingSizeWidthAsync(db, logger, ct);
+            _userChildrenSchemaReady = true;
+        }
+        finally
+        {
+            UserChildrenSchemaLock.Release();
         }
     }
 
@@ -220,6 +253,84 @@ public static class DbSchemaBootstrap
         logger.LogInformation("Migration applied: misc expenses can exist without shipment");
     }
 
+    private static async Task EnsureUserAutoFilterColumnAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var tableName = await ScalarStringAsync(db,
+            """
+            SELECT TABLE_NAME
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'users'
+            LIMIT 1
+            """, ct);
+
+        if (string.IsNullOrEmpty(tableName))
+        {
+            logger.LogWarning("Table users not found, skip AutoFilterByChildren column");
+            return;
+        }
+
+        var exists = await ScalarIntAsync(db,
+            $"""
+             SELECT COUNT(*)
+             FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = '{tableName}'
+               AND COLUMN_NAME = 'AutoFilterByChildren'
+             """, ct);
+
+        if (exists > 0)
+        {
+            logger.LogInformation("Column AutoFilterByChildren already exists on {Table}", tableName);
+            return;
+        }
+
+        logger.LogWarning("Adding {Table}.AutoFilterByChildren", tableName);
+        await db.Database.ExecuteSqlRawAsync(
+            $"ALTER TABLE `{tableName}` ADD COLUMN AutoFilterByChildren TINYINT(1) NOT NULL DEFAULT 0",
+            ct);
+        logger.LogInformation("Column AutoFilterByChildren added");
+    }
+
+    private static async Task EnsureUserDateOfBirthColumnAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var tableName = await ScalarStringAsync(db,
+            """
+            SELECT TABLE_NAME
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'users'
+            LIMIT 1
+            """, ct);
+
+        if (string.IsNullOrEmpty(tableName))
+            return;
+
+        var exists = await ScalarIntAsync(db,
+            $"""
+             SELECT COUNT(*)
+             FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = '{tableName}'
+               AND COLUMN_NAME = 'DateOfBirth'
+             """, ct);
+
+        if (exists > 0)
+            return;
+
+        logger.LogWarning("Adding {Table}.DateOfBirth", tableName);
+        await db.Database.ExecuteSqlRawAsync(
+            $"ALTER TABLE `{tableName}` ADD COLUMN DateOfBirth DATE NULL",
+            ct);
+        logger.LogInformation("Column DateOfBirth added");
+    }
+
     private static async Task EnsureUserChildrenTableAsync(
         AppDbContext db,
         ILogger logger,
@@ -270,6 +381,18 @@ public static class DbSchemaBootstrap
                CONSTRAINT FK_UserChildren_Users FOREIGN KEY (UserId) REFERENCES `{usersTable}` (Id) ON DELETE CASCADE
              ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
              """, ct);
+
+        var created = await ScalarIntAsync(db,
+            """
+            SELECT COUNT(*)
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'userchildren'
+            """, ct);
+
+        if (created == 0)
+            throw new InvalidOperationException("userchildren table was not created by schema bootstrap");
+
         logger.LogInformation("Table userchildren created");
     }
 

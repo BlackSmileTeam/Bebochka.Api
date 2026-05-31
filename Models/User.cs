@@ -74,5 +74,13 @@ public class User
     /// Gets or sets the preferred custom emoji id for channel posts (Telegram custom_emoji_id)
     /// </summary>
     public string? ChannelCustomEmojiId { get; set; }
+
+    /// <summary>
+    /// When true, catalog filters are pre-filled from saved children sizes/gender.
+    /// </summary>
+    public bool AutoFilterByChildren { get; set; }
+
+    /// <summary>Parent date of birth (optional, for child age validation).</summary>
+    public DateTime? DateOfBirth { get; set; }
 }
 

@@ -141,6 +141,8 @@ public class AppDbContext : DbContext
             entity.Property(e => e.GoogleSub).HasMaxLength(64);
             entity.Property(e => e.VkUserId);
             entity.Property(e => e.IsAdmin).HasDefaultValue(false);
+            entity.Property(e => e.AutoFilterByChildren).HasDefaultValue(false);
+            entity.Property(e => e.DateOfBirth).HasColumnType("date");
             entity.HasIndex(e => e.Username).IsUnique();
             entity.HasIndex(e => e.TelegramUserId).IsUnique().HasFilter("[TelegramUserId] IS NOT NULL");
             entity.HasIndex(e => e.Phone).IsUnique().HasFilter("[Phone] IS NOT NULL");
