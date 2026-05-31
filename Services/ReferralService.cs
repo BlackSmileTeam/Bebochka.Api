@@ -38,6 +38,8 @@ public class ReferralService : IReferralService
 
     public async Task<MyReferralInfoDto> GetMyReferralInfoAsync(int userId, CancellationToken ct = default)
     {
+        await DbSchemaBootstrap.EnsureReferralsReadyAsync(_context, _logger, ct);
+
         var myCode = await _context.ReferralCodes
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.UserId == userId, ct);
@@ -88,6 +90,8 @@ public class ReferralService : IReferralService
 
     public async Task<string> EnsureMyReferralCodeAsync(int userId, CancellationToken ct = default)
     {
+        await DbSchemaBootstrap.EnsureReferralsReadyAsync(_context, _logger, ct);
+
         var existing = await _context.ReferralCodes.FirstOrDefaultAsync(c => c.UserId == userId, ct);
         if (existing != null)
             return existing.Code;
@@ -115,6 +119,8 @@ public class ReferralService : IReferralService
 
     public async Task ApplyReferrerCodeAsync(int userId, string code, CancellationToken ct = default)
     {
+        await DbSchemaBootstrap.EnsureReferralsReadyAsync(_context, _logger, ct);
+
         var normalized = NormalizeCode(code);
         if (string.IsNullOrEmpty(normalized))
             throw new InvalidOperationException("Укажите код приглашения");
@@ -153,6 +159,8 @@ public class ReferralService : IReferralService
 
     public async Task ProcessOrderReceivedAsync(int userId, int orderId, decimal orderFinalAmount, CancellationToken ct = default)
     {
+        await DbSchemaBootstrap.EnsureReferralsReadyAsync(_context, _logger, ct);
+
         if (orderFinalAmount < 0)
             orderFinalAmount = 0;
 
@@ -185,6 +193,8 @@ public class ReferralService : IReferralService
         string? status,
         CancellationToken ct = default)
     {
+        await DbSchemaBootstrap.EnsureReferralsReadyAsync(_context, _logger, ct);
+
         var query = _context.Referrals
             .AsNoTracking()
             .Include(r => r.ReferralCode)
