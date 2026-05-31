@@ -106,7 +106,7 @@ SET @sql := IF(
   IF(
     @referralcodes_exists = 0,
     CONCAT(
-      'CREATE TABLE ReferralCodes (',
+      'CREATE TABLE referralcodes (',
       '  Id INT AUTO_INCREMENT PRIMARY KEY,',
       '  UserId INT NOT NULL,',
       '  Code VARCHAR(32) NOT NULL,',
@@ -117,7 +117,7 @@ SET @sql := IF(
       '  CONSTRAINT FK_ReferralCodes_Users FOREIGN KEY (UserId) REFERENCES `', @users_tbl, '` (Id) ON DELETE CASCADE',
       ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
     ),
-    'SELECT ''ReferralCodes already exists'' AS Info'
+    'SELECT ''referralcodes already exists'' AS Info'
   )
 );
 
@@ -143,11 +143,11 @@ SET @referralcodes_tbl := (
 
 SET @sql := IF(
   @users_tbl IS NULL OR @referralcodes_tbl IS NULL,
-  'SELECT ''ERROR: users or ReferralCodes not found'' AS Info',
+  'SELECT ''ERROR: users or referralcodes not found'' AS Info',
   IF(
     @referrals_exists = 0,
     CONCAT(
-      'CREATE TABLE Referrals (',
+      'CREATE TABLE referrals (',
       '  Id INT AUTO_INCREMENT PRIMARY KEY,',
       '  ReferrerUserId INT NOT NULL,',
       '  ReferredUserId INT NULL,',
@@ -168,7 +168,7 @@ SET @sql := IF(
       '  CONSTRAINT FK_Referrals_ReferralCodes FOREIGN KEY (ReferralCodeId) REFERENCES `', @referralcodes_tbl, '` (Id) ON DELETE RESTRICT',
       ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
     ),
-    'SELECT ''Referrals already exists'' AS Info'
+    'SELECT ''referrals already exists'' AS Info'
   )
 );
 

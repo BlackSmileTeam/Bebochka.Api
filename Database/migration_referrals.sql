@@ -1,12 +1,14 @@
--- Реферальная программа: таблицы ReferralCodes и Referrals (PascalCase — как в EF Core).
+-- Реферальная программа: таблицы referralcodes и referrals (нижний регистр).
 -- Идемпотентно — можно запускать повторно.
 --
 -- mysql -u USER -p bebochka < Database/migration_referrals.sql
 --
--- Проверка после выполнения:
---   SHOW TABLES LIKE 'Referral%';
---   DESCRIBE ReferralCodes;
---   DESCRIBE Referrals;
+-- Если на сервере уже есть PascalCase-таблицы, сначала:
+--   mysql -u USER -p bebochka < Database/migration_rename_tables_to_lowercase.sql
+--
+-- Проверка:
+--   DESCRIBE referralcodes;
+--   DESCRIBE referrals;
 
 USE bebochka;
 
@@ -18,7 +20,6 @@ SET @users_tbl := (
   LIMIT 1
 );
 
--- ReferralCodes (нужна для POST /api/profile/referral/code)
 SET @referralcodes_exists := (
   SELECT COUNT(*)
   FROM information_schema.TABLES
@@ -32,7 +33,7 @@ SET @sql := IF(
   IF(
     @referralcodes_exists = 0,
     CONCAT(
-      'CREATE TABLE ReferralCodes (',
+      'CREATE TABLE referralcodes (',
       '  Id INT AUTO_INCREMENT PRIMARY KEY,',
       '  UserId INT NOT NULL,',
       '  Code VARCHAR(32) NOT NULL,',
@@ -43,7 +44,7 @@ SET @sql := IF(
       '  CONSTRAINT FK_ReferralCodes_Users FOREIGN KEY (UserId) REFERENCES `', @users_tbl, '` (Id) ON DELETE CASCADE',
       ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
     ),
-    'SELECT ''ReferralCodes already exists'' AS Info'
+    'SELECT ''referralcodes already exists'' AS Info'
   )
 );
 
@@ -51,7 +52,6 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- Referrals (нужна для GET /api/admin/referrals и применения кода)
 SET @referrals_exists := (
   SELECT COUNT(*)
   FROM information_schema.TABLES
@@ -77,11 +77,11 @@ SET @orders_tbl := (
 
 SET @sql := IF(
   @users_tbl IS NULL OR @referralcodes_tbl IS NULL,
-  'SELECT ''ERROR: users or ReferralCodes not found'' AS Info',
+  'SELECT ''ERROR: users or referralcodes not found'' AS Info',
   IF(
     @referrals_exists = 0,
     CONCAT(
-      'CREATE TABLE Referrals (',
+      'CREATE TABLE referrals (',
       '  Id INT AUTO_INCREMENT PRIMARY KEY,',
       '  ReferrerUserId INT NOT NULL,',
       '  ReferredUserId INT NULL,',
@@ -94,8 +94,8 @@ SET @sql := IF(
       '  ReferrerRewardAmount DECIMAL(10,2) NULL,',
       '  ReferredRewardAmount DECIMAL(10,2) NULL,',
       '  INDEX IX_Referrals_ReferrerUserId (ReferrerUserId),',
-      '  INDEX IX_Referrals_ReferredUserId (ReferredUserId),',
       '  INDEX IX_Referrals_ReferralCodeId (ReferralCodeId),',
+      '  INDEX IX_Referrals_ReferredUserId (ReferredUserId),',
       '  INDEX IX_Referrals_Status (Status),',
       '  CONSTRAINT FK_Referrals_ReferrerUsers FOREIGN KEY (ReferrerUserId) REFERENCES `', @users_tbl, '` (Id) ON DELETE RESTRICT,',
       '  CONSTRAINT FK_Referrals_ReferredUsers FOREIGN KEY (ReferredUserId) REFERENCES `', @users_tbl, '` (Id) ON DELETE SET NULL,',
@@ -111,7 +111,7 @@ SET @sql := IF(
       ),
       ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
     ),
-    'SELECT ''Referrals already exists'' AS Info'
+    'SELECT ''referrals already exists'' AS Info'
   )
 );
 
@@ -119,5 +119,5 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
-SELECT 'Done. Tables:' AS Info;
-SHOW TABLES LIKE 'Referral%';
+SELECT 'Done.' AS Info;
+SHOW TABLES LIKE 'referral%';

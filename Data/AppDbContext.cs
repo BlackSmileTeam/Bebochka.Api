@@ -92,14 +92,6 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // MySQL на Linux с lower_case_table_names=1 хранит имена таблиц в нижнем регистре (Users -> users).
-        // Без этого Pomelo обращается к `Users`, а физическая таблица — `users` → "Table doesn't exist".
-        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
-        {
-            if (entityType.BaseType == null && !string.IsNullOrEmpty(entityType.GetTableName()))
-                entityType.SetTableName(entityType.GetTableName()!.ToLowerInvariant());
-        }
-
         modelBuilder.Entity<Product>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -375,7 +367,6 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<ReferralCode>(entity =>
         {
-            entity.ToTable("ReferralCodes");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Code).IsRequired().HasMaxLength(32);
             entity.HasIndex(e => e.Code).IsUnique();
@@ -388,7 +379,6 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<Referral>(entity =>
         {
-            entity.ToTable("Referrals");
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Status).IsRequired().HasMaxLength(30).HasDefaultValue("Pending");
             entity.Property(e => e.ReferrerRewardAmount).HasColumnType("decimal(10,2)");
@@ -414,5 +404,16 @@ public class AppDbContext : DbContext
                 .HasForeignKey(e => e.FirstOrderId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
+
+        // После всех конфигураций — единый нижний регистр имён таблиц (как products, users, orders).
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            if (entityType.BaseType == null)
+            {
+                var tableName = entityType.GetTableName();
+                if (!string.IsNullOrEmpty(tableName))
+                    entityType.SetTableName(tableName.ToLowerInvariant());
+            }
+        }
     }
 }

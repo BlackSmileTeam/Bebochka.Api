@@ -141,7 +141,7 @@ public static class DbSchemaBootstrap
 
         await db.Database.ExecuteSqlRawAsync(
             $"""
-             CREATE TABLE PersonalDataConsentLogs (
+             CREATE TABLE personaldataconsentlogs (
                Id INT AUTO_INCREMENT PRIMARY KEY,
                UserId INT NOT NULL,
                ConsentKind VARCHAR(80) NOT NULL,
@@ -182,7 +182,7 @@ public static class DbSchemaBootstrap
 
         await db.Database.ExecuteSqlRawAsync(
             """
-            CREATE TABLE TelegramErrors (
+            CREATE TABLE telegramerrors (
               Id INT AUTO_INCREMENT PRIMARY KEY,
               Message VARCHAR(2000) NOT NULL,
               Details TEXT NULL,
@@ -451,7 +451,7 @@ public static class DbSchemaBootstrap
 
         await EnsureTableAsync(db, logger, "referralcodes",
             $"""
-             CREATE TABLE IF NOT EXISTS ReferralCodes (
+             CREATE TABLE IF NOT EXISTS referralcodes (
                Id INT AUTO_INCREMENT PRIMARY KEY,
                UserId INT NOT NULL,
                Code VARCHAR(32) NOT NULL,
@@ -473,17 +473,17 @@ public static class DbSchemaBootstrap
             """, ct);
 
         if (string.IsNullOrEmpty(referralCodesTable))
-            throw new InvalidOperationException("ReferralCodes table was not created by schema bootstrap");
+            throw new InvalidOperationException("referralcodes table was not created by schema bootstrap");
 
         if (await TableExistsAsync(db, "referrals", ct))
         {
-            logger.LogInformation("Table Referrals already exists");
+            logger.LogInformation("Table referrals already exists");
             return;
         }
 
-        logger.LogWarning("Creating table Referrals");
+        logger.LogWarning("Creating table referrals");
         var referralsSql = $"""
-            CREATE TABLE IF NOT EXISTS Referrals (
+            CREATE TABLE IF NOT EXISTS referrals (
               Id INT AUTO_INCREMENT PRIMARY KEY,
               ReferrerUserId INT NOT NULL,
               ReferredUserId INT NULL,
@@ -514,7 +514,7 @@ public static class DbSchemaBootstrap
             logger.LogWarning(ex, "Referrals table create with FK failed, retrying without foreign keys");
             await db.Database.ExecuteSqlRawAsync(
                 """
-                CREATE TABLE IF NOT EXISTS Referrals (
+                CREATE TABLE IF NOT EXISTS referrals (
                   Id INT AUTO_INCREMENT PRIMARY KEY,
                   ReferrerUserId INT NOT NULL,
                   ReferredUserId INT NULL,
@@ -535,9 +535,9 @@ public static class DbSchemaBootstrap
         }
 
         if (!await TableExistsAsync(db, "referrals", ct))
-            throw new InvalidOperationException("Referrals table was not created by schema bootstrap");
+            throw new InvalidOperationException("referrals table was not created by schema bootstrap");
 
-        logger.LogInformation("Table Referrals created");
+        logger.LogInformation("Table referrals created");
     }
 
     private static async Task<bool> TableExistsAsync(AppDbContext db, string tableNameLower, CancellationToken ct)
