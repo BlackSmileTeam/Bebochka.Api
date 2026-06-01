@@ -75,6 +75,12 @@ public class Order
     public int? Condition3ItemsPercent { get; set; }
     /// <summary>Discount percent for 5+ items (when DiscountType = ByCondition).</summary>
     public int? Condition5PlusPercent { get; set; }
+
+    /// <summary>Referral row used for checkout discount (if any).</summary>
+    public int? ReferralId { get; set; }
+
+    /// <summary>Referred = invitee first order; Referrer = reward for inviting someone.</summary>
+    public string? ReferralDiscountKind { get; set; }
     
     /// <summary>
     /// Gets or sets the list of order items

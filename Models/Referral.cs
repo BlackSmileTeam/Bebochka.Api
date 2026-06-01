@@ -23,6 +23,12 @@ public class Referral
 
     public int? FirstOrderId { get; set; }
 
+    /// <summary>Order where the invited user applied their 10% first-order discount.</summary>
+    public int? ReferredDiscountOrderId { get; set; }
+
+    /// <summary>Order where the referrer applied their 10% reward for this invite.</summary>
+    public int? ReferrerDiscountOrderId { get; set; }
+
     public DateTime? RewardGrantedAt { get; set; }
 
     public decimal? ReferrerRewardAmount { get; set; }

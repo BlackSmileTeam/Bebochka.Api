@@ -74,6 +74,12 @@ public class ProductDto
     /// Gets or sets the product condition (новая, отличное, недостаток)
     /// </summary>
     public string? Condition { get; set; }
+
+    public string? Nuance { get; set; }
+
+    public int? DiscountPercent { get; set; }
+
+    public decimal? FinalPrice { get; set; }
     
     /// <summary>
     /// Gets or sets the date and time when the product should be published
@@ -151,6 +157,10 @@ public class CreateProductDto
     /// Gets or sets the product condition (новая, отличное, недостаток)
     /// </summary>
     public string? Condition { get; set; }
+
+    public string? Nuance { get; set; }
+
+    public int? DiscountPercent { get; set; }
     
     /// <summary>
     /// Gets or sets the date and time when the product should be published
@@ -227,6 +237,10 @@ public class UpdateProductDto
     /// Gets or sets the product condition (новая, отличное, недостаток)
     /// </summary>
     public string? Condition { get; set; }
+
+    public string? Nuance { get; set; }
+
+    public int? DiscountPercent { get; set; }
     
     /// <summary>
     /// Gets or sets the date and time when the product should be published

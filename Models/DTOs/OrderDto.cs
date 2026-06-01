@@ -149,6 +149,10 @@ public class CreateOrderDto
     public string? DeliveryMethod { get; set; }
     public string? Comment { get; set; }
     public List<CreateOrderItemDto> Items { get; set; } = new();
+    /// <summary>Referral row id from GET /profile/referral/cart-discounts.</summary>
+    public int? ReferralDiscountReferralId { get; set; }
+    /// <summary>Referred | Referrer — must match the option kind.</summary>
+    public string? ReferralDiscountKind { get; set; }
 }
 
 /// <summary>

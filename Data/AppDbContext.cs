@@ -84,6 +84,10 @@ public class AppDbContext : DbContext
     public DbSet<IncomingShipment> IncomingShipments { get; set; }
     public DbSet<IncomingShipmentExpense> IncomingShipmentExpenses { get; set; }
 
+    public DbSet<ProductColor> ProductColors { get; set; }
+    public DbSet<ProductCondition> ProductConditions { get; set; }
+    public DbSet<ProductNuance> ProductNuances { get; set; }
+
     /// <summary>
     /// Configures the entity models and their relationships
     /// </summary>
@@ -112,6 +116,8 @@ public class AppDbContext : DbContext
             entity.Property(e => e.BoxNumber).HasMaxLength(50);
             entity.Property(e => e.Owner).HasMaxLength(50);
             entity.Property(e => e.IncomingShipmentId);
+            entity.Property(e => e.Nuance).HasMaxLength(100);
+            entity.Property(e => e.DiscountPercent);
             entity.HasIndex(e => e.PublishedAt);
             entity.HasIndex(e => new { e.TelegramChatId, e.TelegramMessageId });
             entity.HasIndex(e => e.IncomingShipmentId);
@@ -403,6 +409,25 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.FirstOrderId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProductColor>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(e => e.Name).IsUnique();
+        });
+        modelBuilder.Entity<ProductCondition>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(e => e.Name).IsUnique();
+        });
+        modelBuilder.Entity<ProductNuance>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
+            entity.HasIndex(e => e.Name).IsUnique();
         });
 
         // После всех конфигураций — единый нижний регистр имён таблиц (как products, users, orders).

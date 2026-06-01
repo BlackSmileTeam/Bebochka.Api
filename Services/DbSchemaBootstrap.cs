@@ -40,6 +40,7 @@ public static class DbSchemaBootstrap
                 logger.LogError(ex, "Referral tables bootstrap failed on startup; will retry on first referral request");
             }
             await EnsureUserChildrenClothingSizeWidthAsync(db, logger, ct);
+            await EnsureProductCatalogLookupsAsync(db, logger, ct);
             _userChildrenSchemaReady = true;
             logger.LogInformation("DbSchemaBootstrap completed");
         }
@@ -68,6 +69,8 @@ public static class DbSchemaBootstrap
                 return;
 
             await EnsureReferralTablesCoreAsync(db, logger, ct);
+            await EnsureReferralDiscountColumnsAsync(db, logger, ct);
+            await EnsureOrderReferralDiscountColumnsAsync(db, logger, ct);
             _referralSchemaReady = true;
         }
         finally
@@ -478,6 +481,8 @@ public static class DbSchemaBootstrap
         if (await TableExistsAsync(db, "referrals", ct))
         {
             logger.LogInformation("Table referrals already exists");
+            await EnsureReferralDiscountColumnsAsync(db, logger, ct);
+            await EnsureOrderReferralDiscountColumnsAsync(db, logger, ct);
             return;
         }
 
@@ -538,6 +543,158 @@ public static class DbSchemaBootstrap
             throw new InvalidOperationException("referrals table was not created by schema bootstrap");
 
         logger.LogInformation("Table referrals created");
+
+        await EnsureReferralDiscountColumnsAsync(db, logger, ct);
+        await EnsureOrderReferralDiscountColumnsAsync(db, logger, ct);
+    }
+
+    private static async Task EnsureReferralDiscountColumnsAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var tableName = await ScalarStringAsync(db,
+            """
+            SELECT TABLE_NAME
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'referrals'
+            LIMIT 1
+            """, ct);
+        if (string.IsNullOrEmpty(tableName))
+            return;
+
+        await EnsureColumnAsync(db, logger, tableName, "ReferredDiscountOrderId", "INT NULL", ct);
+        await EnsureColumnAsync(db, logger, tableName, "ReferrerDiscountOrderId", "INT NULL", ct);
+    }
+
+    private static async Task EnsureOrderReferralDiscountColumnsAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var tableName = await ScalarStringAsync(db,
+            """
+            SELECT TABLE_NAME
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'orders'
+            LIMIT 1
+            """, ct);
+        if (string.IsNullOrEmpty(tableName))
+            return;
+
+        await EnsureColumnAsync(db, logger, tableName, "ReferralId", "INT NULL", ct);
+        await EnsureColumnAsync(db, logger, tableName, "ReferralDiscountKind", "VARCHAR(20) NULL", ct);
+    }
+
+    private static async Task EnsureProductCatalogLookupsAsync(
+        AppDbContext db,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        await EnsureTableAsync(db, logger, "productcolors",
+            """
+            CREATE TABLE IF NOT EXISTS productcolors (
+              Id INT AUTO_INCREMENT PRIMARY KEY,
+              Name VARCHAR(100) NOT NULL,
+              UNIQUE KEY uk_productcolors_name (Name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """, ct);
+
+        await EnsureTableAsync(db, logger, "productconditions",
+            """
+            CREATE TABLE IF NOT EXISTS productconditions (
+              Id INT AUTO_INCREMENT PRIMARY KEY,
+              Name VARCHAR(100) NOT NULL,
+              UNIQUE KEY uk_productconditions_name (Name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """, ct);
+
+        await EnsureTableAsync(db, logger, "productnuances",
+            """
+            CREATE TABLE IF NOT EXISTS productnuances (
+              Id INT AUTO_INCREMENT PRIMARY KEY,
+              Name VARCHAR(100) NOT NULL,
+              UNIQUE KEY uk_productnuances_name (Name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """, ct);
+
+        var productsTable = await ScalarStringAsync(db,
+            """
+            SELECT TABLE_NAME FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'products' LIMIT 1
+            """, ct);
+        if (!string.IsNullOrEmpty(productsTable))
+        {
+            await EnsureColumnAsync(db, logger, productsTable, "Nuance", "VARCHAR(100) NULL", ct);
+            await EnsureColumnAsync(db, logger, productsTable, "DiscountPercent", "INT NULL", ct);
+        }
+
+        await SeedProductColorsAsync(db, logger, ct);
+        await SeedProductConditionsAsync(db, logger, ct);
+    }
+
+    private static async Task SeedProductColorsAsync(AppDbContext db, ILogger logger, CancellationToken ct)
+    {
+        var defaults = new[]
+        {
+            "Белый", "Черный", "Серый", "Бежевый", "Коричневый", "Красный", "Бордовый",
+            "Розовый", "Оранжевый", "Желтый", "Зеленый", "Голубой", "Синий", "Фиолетовый",
+            "Многоцветный", "Другой"
+        };
+        foreach (var name in defaults)
+        {
+            var exists = await ScalarIntAsync(db,
+                $"SELECT COUNT(*) FROM productcolors WHERE LOWER(Name) = LOWER('{name.Replace("'", "''")}')", ct);
+            if (exists > 0) continue;
+            await db.Database.ExecuteSqlRawAsync(
+                $"INSERT INTO productcolors (Name) VALUES ('{name.Replace("'", "''")}')", ct);
+            logger.LogInformation("Seeded product color: {Name}", name);
+        }
+    }
+
+    private static async Task SeedProductConditionsAsync(AppDbContext db, ILogger logger, CancellationToken ct)
+    {
+        var defaults = new[]
+        {
+            "новая вещь", "состояние новой вещи", "очень хорошее", "отличное", "хорошее", "нюанс"
+        };
+        foreach (var name in defaults)
+        {
+            var exists = await ScalarIntAsync(db,
+                $"SELECT COUNT(*) FROM productconditions WHERE LOWER(Name) = LOWER('{name.Replace("'", "''")}')", ct);
+            if (exists > 0) continue;
+            await db.Database.ExecuteSqlRawAsync(
+                $"INSERT INTO productconditions (Name) VALUES ('{name.Replace("'", "''")}')", ct);
+            logger.LogInformation("Seeded product condition: {Name}", name);
+        }
+    }
+
+    private static async Task EnsureColumnAsync(
+        AppDbContext db,
+        ILogger logger,
+        string tableName,
+        string columnName,
+        string columnDefinition,
+        CancellationToken ct)
+    {
+        var exists = await ScalarIntAsync(db,
+            $"""
+             SELECT COUNT(*)
+             FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = '{tableName}'
+               AND COLUMN_NAME = '{columnName}'
+             """, ct);
+
+        if (exists > 0)
+            return;
+
+        logger.LogWarning("Adding column {Table}.{Column}", tableName, columnName);
+        await db.Database.ExecuteSqlRawAsync(
+            $"ALTER TABLE `{tableName}` ADD COLUMN {columnName} {columnDefinition}",
+            ct);
     }
 
     private static async Task<bool> TableExistsAsync(AppDbContext db, string tableNameLower, CancellationToken ct)

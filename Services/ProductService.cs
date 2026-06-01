@@ -127,6 +127,8 @@ public class ProductService : IProductService
             QuantityInStock = dto.QuantityInStock > 0 ? dto.QuantityInStock : 1,
             Gender = dto.Gender,
             Condition = dto.Condition,
+            Nuance = string.IsNullOrWhiteSpace(dto.Nuance) ? null : dto.Nuance.Trim(),
+            DiscountPercent = NormalizeDiscountPercent(dto.DiscountPercent),
             PublishedAt = dto.PublishedAt, // Store as Moscow time directly
             CartAvailableAt = dto.CartAvailableAt,
             BoxNumber = dto.BoxNumber,
@@ -179,6 +181,10 @@ public class ProductService : IProductService
             product.Gender = dto.Gender;
         if (dto.Condition != null)
             product.Condition = dto.Condition;
+        if (dto.Nuance != null)
+            product.Nuance = string.IsNullOrWhiteSpace(dto.Nuance) ? null : dto.Nuance.Trim();
+        if (dto.DiscountPercent.HasValue)
+            product.DiscountPercent = NormalizeDiscountPercent(dto.DiscountPercent);
         // PublishedAt comes as UTC DateTime but represents Moscow time components
         // Extract components and store as Moscow time
         if (dto.PublishedAt.HasValue)
@@ -265,6 +271,40 @@ public class ProductService : IProductService
         return query.Where(c => !(c.UserId == null && c.SessionId == sessionId));
     }
 
+    public async Task<int> ApplyBulkDiscountAsync(IEnumerable<int> productIds, int? discountPercent, CancellationToken ct = default)
+    {
+        var ids = productIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return 0;
+
+        var normalized = NormalizeDiscountPercent(discountPercent);
+        var products = await _context.Products.Where(p => ids.Contains(p.Id)).ToListAsync(ct);
+        foreach (var product in products)
+        {
+            product.DiscountPercent = normalized;
+            product.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync(ct);
+        return products.Count;
+    }
+
+    private static int? NormalizeDiscountPercent(int? percent)
+    {
+        if (!percent.HasValue || percent.Value <= 0)
+            return null;
+        if (percent.Value > 99)
+            return 99;
+        return percent.Value;
+    }
+
+    private static decimal? ComputeFinalPrice(decimal price, int? discountPercent)
+    {
+        if (!discountPercent.HasValue || discountPercent.Value <= 0)
+            return null;
+        return Math.Round(price * (100 - discountPercent.Value) / 100m, 2);
+    }
+
     private static ProductDto MapToDto(Product product)
     {
         var moscowNow = DateTimeHelper.GetMoscowTime();
@@ -282,6 +322,9 @@ public class ProductService : IProductService
             QuantityInStock = product.QuantityInStock,
             Gender = product.Gender,
             Condition = product.Condition,
+            Nuance = product.Nuance,
+            DiscountPercent = product.DiscountPercent,
+            FinalPrice = ComputeFinalPrice(product.Price, product.DiscountPercent),
             PublishedAt = product.PublishedAt,
             CartAvailableAt = product.CartAvailableAt,
             CartUnlocked = cartUnlocked,

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Bebochka.Api.Data;
 using Bebochka.Api.Models;
+using Bebochka.Api.Models.DTOs;
 
 namespace Bebochka.Api.Controllers;
 
@@ -25,18 +26,37 @@ public class BrandsController : ControllerBase
     /// Gets all brands
     /// </summary>
     [HttpGet]
-    public async Task<ActionResult<List<Brand>>> GetBrands([FromQuery] string? search = null)
+    public async Task<ActionResult<List<BrandListItemDto>>> GetBrands([FromQuery] string? search = null)
     {
         var query = _context.Brands.AsQueryable();
-        
+
         if (!string.IsNullOrWhiteSpace(search))
-        {
-            // Case-insensitive search - MySQL utf8mb4_unicode_ci collation handles this automatically
             query = query.Where(b => b.Name.Contains(search));
-        }
-        
+
         var brands = await query.OrderBy(b => b.Name).ToListAsync();
-        return Ok(brands);
+
+        var productBrands = await _context.Products
+            .Where(p => p.Brand != null && p.Brand != "")
+            .Select(p => p.Brand!)
+            .ToListAsync();
+
+        var countByName = productBrands
+            .GroupBy(b => b.Trim().ToLowerInvariant())
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        var result = brands.Select(b =>
+        {
+            var key = b.Name.Trim().ToLowerInvariant();
+            countByName.TryGetValue(key, out var count);
+            return new BrandListItemDto
+            {
+                Id = b.Id,
+                Name = b.Name,
+                ProductCount = count
+            };
+        }).ToList();
+
+        return Ok(result);
     }
 
     /// <summary>

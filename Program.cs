@@ -217,6 +217,7 @@ builder.Services.AddAuthorization();
         builder.Services.AddScoped<WebReserveQueueService>();
         builder.Services.AddScoped<IOrderService, OrderService>();
         builder.Services.AddScoped<IReferralService, ReferralService>();
+        builder.Services.AddScoped<LookupItemsService>();
         builder.Services.AddScoped<IEmailService, EmailService>();
         builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
         builder.Services.AddScoped<CollageService>();

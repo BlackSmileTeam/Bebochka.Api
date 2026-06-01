@@ -132,6 +132,18 @@ public class OrderService : IOrderService
         _context.Orders.Add(order);
         await _context.SaveChangesAsync();
 
+        if (dto.UserId.HasValue &&
+            dto.ReferralDiscountReferralId.HasValue &&
+            !string.IsNullOrWhiteSpace(dto.ReferralDiscountKind))
+        {
+            await _referralService.ApplyReferralDiscountToOrderAsync(
+                dto.UserId.Value,
+                order.Id,
+                dto.ReferralDiscountReferralId.Value,
+                dto.ReferralDiscountKind.Trim(),
+                totalAmount);
+        }
+
         // Отправляем email
         try
         {

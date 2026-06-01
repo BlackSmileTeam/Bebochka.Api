@@ -63,4 +63,6 @@ public interface IProductService
     /// </summary>
     /// <returns>List of unpublished products</returns>
     Task<List<ProductDto>> GetUnpublishedProductsAsync();
+
+    Task<int> ApplyBulkDiscountAsync(IEnumerable<int> productIds, int? discountPercent, CancellationToken ct = default);
 }

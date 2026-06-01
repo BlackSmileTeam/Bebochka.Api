@@ -22,6 +22,7 @@ public class ProductsController : ControllerBase
     private readonly AppDbContext _context;
     private readonly IConfiguration _configuration;
     private readonly IAuthService _authService;
+    private readonly LookupItemsService _lookupItemsService;
 
     /// <summary>
     /// Initializes a new instance of the ProductsController class
@@ -32,7 +33,8 @@ public class ProductsController : ControllerBase
         IServiceScopeFactory scopeFactory,
         AppDbContext context,
         IConfiguration configuration,
-        IAuthService authService)
+        IAuthService authService,
+        LookupItemsService lookupItemsService)
     {
         _productService = productService;
         _environment = environment;
@@ -40,6 +42,7 @@ public class ProductsController : ControllerBase
         _context = context;
         _configuration = configuration;
         _authService = authService;
+        _lookupItemsService = lookupItemsService;
     }
 
     private async Task<int?> TryGetUserIdFromBearerAsync()
@@ -234,6 +237,8 @@ public class ProductsController : ControllerBase
 
             contentStopwatch.Stop();
             await NormalizeIncomingShipmentIdAsync(dto);
+            if (!string.IsNullOrWhiteSpace(dto.Nuance))
+                dto.Nuance = await _lookupItemsService.EnsureNuanceExistsAsync(dto.Nuance);
             var dbStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var product = await _productService.CreateProductAsync(dto, imagePaths);
             dbStopwatch.Stop();
@@ -407,6 +412,8 @@ public class ProductsController : ControllerBase
 
             contentStopwatch.Stop();
             await NormalizeIncomingShipmentIdAsync(dto);
+            if (!string.IsNullOrWhiteSpace(dto.Nuance))
+                dto.Nuance = await _lookupItemsService.EnsureNuanceExistsAsync(dto.Nuance);
             var dbStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var product = await _productService.UpdateProductAsync(id, dto, imagePaths);
             dbStopwatch.Stop();
@@ -495,6 +502,18 @@ public class ProductsController : ControllerBase
     {
         var products = await _productService.GetAllProductsForAdminAsync();
         return Ok(products);
+    }
+
+    [HttpPost("admin/bulk-discount")]
+    [Authorize(Roles = "Admin")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult> ApplyBulkDiscount([FromBody] BulkProductDiscountDto? dto)
+    {
+        if (dto?.ProductIds == null || dto.ProductIds.Count == 0)
+            return BadRequest(new { message = "Выберите хотя бы один товар" });
+
+        var updated = await _productService.ApplyBulkDiscountAsync(dto.ProductIds, dto.DiscountPercent);
+        return Ok(new { updated });
     }
 
     /// <summary>

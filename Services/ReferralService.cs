@@ -18,6 +18,12 @@ public class ReferralService : IReferralService
         public const string RewardGranted = "RewardGranted";
     }
 
+    public static class ReferralDiscountKind
+    {
+        public const string Referred = "Referred";
+        public const string Referrer = "Referrer";
+    }
+
     private const string RulesText =
         "Пригласи друга — получи скидку 10%. Поделитесь своим личным кодом. " +
         "И вы, и тот, кого вы пригласили, получите скидку 10% от всей суммы заказа. " +
@@ -71,7 +77,8 @@ public class ReferralService : IReferralService
                     Code = asReferred.ReferralCode?.Code ?? string.Empty,
                     ReferrerName = asReferred.ReferrerUser?.FullName ?? asReferred.ReferrerUser?.Username,
                     Status = MapStatusLabel(asReferred.Status),
-                    AppliedAt = asReferred.RegisteredAt ?? asReferred.CreatedAt
+                    AppliedAt = asReferred.RegisteredAt ?? asReferred.CreatedAt,
+                    DiscountUsed = asReferred.ReferredDiscountOrderId != null
                 },
             CanApplyReferrerCode = canApply,
             InvitedCount = invited.Count,
@@ -82,7 +89,8 @@ public class ReferralService : IReferralService
                 Status = MapStatusLabel(r.Status),
                 CreatedAt = r.CreatedAt,
                 RegisteredAt = r.RegisteredAt,
-                ReferrerRewardAmount = r.ReferrerRewardAmount
+                ReferrerRewardAmount = r.ReferrerRewardAmount,
+                ReferrerDiscountUsed = r.ReferrerDiscountOrderId != null
             }).ToList(),
             Rules = RulesText
         };
@@ -157,6 +165,145 @@ public class ReferralService : IReferralService
         await _context.SaveChangesAsync(ct);
     }
 
+    public async Task<List<CartReferralDiscountOptionDto>> GetCartReferralDiscountOptionsAsync(
+        int userId,
+        CancellationToken ct = default)
+    {
+        await DbSchemaBootstrap.EnsureReferralsReadyAsync(_context, _logger, ct);
+
+        var options = new List<CartReferralDiscountOptionDto>();
+        var hasOrders = await UserHasNonCancelledOrdersAsync(userId, excludeOrderId: null, ct);
+
+        if (!hasOrders)
+        {
+            var asReferred = await _context.Referrals
+                .AsNoTracking()
+                .Include(r => r.ReferrerUser)
+                .FirstOrDefaultAsync(r =>
+                    r.ReferredUserId == userId &&
+                    r.ReferredDiscountOrderId == null &&
+                    r.Status != ReferralStatus.Pending, ct);
+
+            if (asReferred != null)
+            {
+                var referrerName = asReferred.ReferrerUser?.FullName ?? asReferred.ReferrerUser?.Username;
+                options.Add(new CartReferralDiscountOptionDto
+                {
+                    ReferralId = asReferred.Id,
+                    Kind = ReferralDiscountKind.Referred,
+                    Label = "Скидка 10% — первый заказ по приглашению",
+                    ForUserName = referrerName,
+                    DiscountPercent = (int)ReferredRewardPercent
+                });
+            }
+        }
+
+        var invites = await _context.Referrals
+            .AsNoTracking()
+            .Include(r => r.ReferredUser)
+            .Where(r =>
+                r.ReferrerUserId == userId &&
+                r.ReferredUserId != null &&
+                r.ReferrerDiscountOrderId == null &&
+                r.Status != ReferralStatus.Pending)
+            .OrderByDescending(r => r.RegisteredAt ?? r.CreatedAt)
+            .ToListAsync(ct);
+
+        foreach (var inv in invites)
+        {
+            var name = inv.ReferredUser?.FullName ?? inv.ReferredUser?.Username ?? "приглашённый";
+            options.Add(new CartReferralDiscountOptionDto
+            {
+                ReferralId = inv.Id,
+                Kind = ReferralDiscountKind.Referrer,
+                Label = $"Скидка 10% — за приглашение",
+                ForUserName = name,
+                DiscountPercent = (int)ReferrerRewardPercent
+            });
+        }
+
+        return options;
+    }
+
+    public async Task ApplyReferralDiscountToOrderAsync(
+        int userId,
+        int orderId,
+        int referralId,
+        string kind,
+        decimal orderTotalAmount,
+        CancellationToken ct = default)
+    {
+        await DbSchemaBootstrap.EnsureReferralsReadyAsync(_context, _logger, ct);
+
+        var normalizedKind = kind?.Trim() ?? string.Empty;
+        if (normalizedKind != ReferralDiscountKind.Referred && normalizedKind != ReferralDiscountKind.Referrer)
+            throw new InvalidOperationException("Некорректный тип реферальной скидки");
+
+        var referral = await _context.Referrals
+            .Include(r => r.ReferredUser)
+            .FirstOrDefaultAsync(r => r.Id == referralId, ct);
+
+        if (referral == null)
+            throw new InvalidOperationException("Реферальная скидка не найдена");
+
+        var order = await _context.Orders.FindAsync(new object[] { orderId }, ct);
+        if (order == null)
+            throw new InvalidOperationException("Заказ не найден");
+
+        if (order.UserId != userId)
+            throw new InvalidOperationException("Скидку можно применить только к своему заказу");
+
+        var discountAmount = Math.Round(orderTotalAmount * ReferredRewardPercent / 100m, 2);
+
+        if (normalizedKind == ReferralDiscountKind.Referred)
+        {
+            if (referral.ReferredUserId != userId)
+                throw new InvalidOperationException("Эта скидка недоступна для вашего аккаунта");
+            if (referral.ReferredDiscountOrderId != null)
+                throw new InvalidOperationException("Скидка по приглашению уже была использована");
+            if (referral.Status == ReferralStatus.Pending)
+                throw new InvalidOperationException("Скидка по приглашению недоступна");
+            if (await UserHasNonCancelledOrdersAsync(userId, orderId, ct))
+                throw new InvalidOperationException("Скидка доступна только на первый заказ");
+
+            referral.ReferredDiscountOrderId = orderId;
+            referral.FirstOrderId = orderId;
+            referral.ReferredRewardAmount = discountAmount;
+            referral.Status = ReferralStatus.RewardGranted;
+            referral.RewardGrantedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            if (referral.ReferrerUserId != userId)
+                throw new InvalidOperationException("Эта скидка недоступна для вашего аккаунта");
+            if (referral.ReferrerDiscountOrderId != null)
+                throw new InvalidOperationException("Скидка за этого приглашённого уже была использована");
+            if (referral.ReferredUserId == null)
+                throw new InvalidOperationException("Приглашённый ещё не зарегистрировался");
+
+            referral.ReferrerDiscountOrderId = orderId;
+            referral.ReferrerRewardAmount = discountAmount;
+            if (referral.Status == ReferralStatus.Registered)
+                referral.Status = ReferralStatus.RewardGranted;
+            if (referral.RewardGrantedAt == null)
+                referral.RewardGrantedAt = DateTime.UtcNow;
+        }
+
+        order.DiscountType = "Fixed";
+        order.FixedDiscountPercent = (int)ReferredRewardPercent;
+        order.Condition1ItemPercent = null;
+        order.Condition3ItemsPercent = null;
+        order.Condition5PlusPercent = null;
+        order.ReferralId = referralId;
+        order.ReferralDiscountKind = normalizedKind;
+        order.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(ct);
+        _logger.LogInformation(
+            "Referral discount {Kind} applied: user {UserId}, referral {ReferralId}, order {OrderId}",
+            normalizedKind, userId, referralId, orderId);
+    }
+
     public async Task ProcessOrderReceivedAsync(int userId, int orderId, decimal orderFinalAmount, CancellationToken ct = default)
     {
         await DbSchemaBootstrap.EnsureReferralsReadyAsync(_context, _logger, ct);
@@ -165,11 +312,12 @@ public class ReferralService : IReferralService
             orderFinalAmount = 0;
 
         var asReferred = await _context.Referrals
-            .FirstOrDefaultAsync(r =>
-                r.ReferredUserId == userId &&
-                r.Status == ReferralStatus.Registered, ct);
+            .FirstOrDefaultAsync(r => r.ReferredUserId == userId, ct);
 
         if (asReferred == null)
+            return;
+
+        if (asReferred.ReferredDiscountOrderId != null)
             return;
 
         var receivedCount = await _context.Orders
@@ -185,7 +333,16 @@ public class ReferralService : IReferralService
         asReferred.RewardGrantedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync(ct);
-        _logger.LogInformation("Referral reward granted for referred user {UserId}, order {OrderId}", userId, orderId);
+        _logger.LogInformation("Referral reward recorded on receive for referred user {UserId}, order {OrderId}", userId, orderId);
+    }
+
+    private async Task<bool> UserHasNonCancelledOrdersAsync(int userId, int? excludeOrderId = null, CancellationToken ct = default)
+    {
+        return await _context.Orders
+            .AnyAsync(o =>
+                o.UserId == userId &&
+                o.Status != "Отменен" &&
+                (excludeOrderId == null || o.Id != excludeOrderId), ct);
     }
 
     public async Task<List<AdminReferralListItemDto>> SearchReferralsAsync(

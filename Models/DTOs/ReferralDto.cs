@@ -17,6 +17,17 @@ public class ReferredByInfoDto
     public string? ReferrerName { get; set; }
     public string Status { get; set; } = string.Empty;
     public DateTime? AppliedAt { get; set; }
+    public bool DiscountUsed { get; set; }
+}
+
+public class CartReferralDiscountOptionDto
+{
+    public int ReferralId { get; set; }
+    /// <summary>Referred | Referrer</summary>
+    public string Kind { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public string? ForUserName { get; set; }
+    public int DiscountPercent { get; set; } = 10;
 }
 
 public class MyReferralInviteDto
@@ -27,6 +38,7 @@ public class MyReferralInviteDto
     public DateTime CreatedAt { get; set; }
     public DateTime? RegisteredAt { get; set; }
     public decimal? ReferrerRewardAmount { get; set; }
+    public bool ReferrerDiscountUsed { get; set; }
 }
 
 public class ApplyReferrerCodeDto

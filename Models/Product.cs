@@ -102,6 +102,12 @@ public class Product
     /// Gets or sets the product condition (новая, отличное, недостаток)
     /// </summary>
     public string? Condition { get; set; }
+
+    /// <summary>Detail when condition is «нюанс» (e.g. small stain).</summary>
+    public string? Nuance { get; set; }
+
+    /// <summary>Catalog discount percent (1–99); null = no discount.</summary>
+    public int? DiscountPercent { get; set; }
     
     /// <summary>
     /// Gets or sets the date and time when the product should be published and become visible in catalog

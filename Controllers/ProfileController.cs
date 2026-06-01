@@ -267,6 +267,15 @@ public class ProfileController : ControllerBase
         return NoContent();
     }
 
+    [HttpGet("referral/cart-discounts")]
+    [ProducesResponseType(typeof(List<CartReferralDiscountOptionDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<CartReferralDiscountOptionDto>>> GetCartReferralDiscounts()
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+        return Ok(await _referralService.GetCartReferralDiscountOptionsAsync(userId.Value));
+    }
+
     [HttpGet("referral")]
     [ProducesResponseType(typeof(MyReferralInfoDto), StatusCodes.Status200OK)]
     public async Task<ActionResult<MyReferralInfoDto>> GetMyReferralInfo()
