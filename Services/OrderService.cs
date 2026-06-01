@@ -132,16 +132,23 @@ public class OrderService : IOrderService
         _context.Orders.Add(order);
         await _context.SaveChangesAsync();
 
-        if (dto.UserId.HasValue &&
-            dto.ReferralDiscountReferralId.HasValue &&
-            !string.IsNullOrWhiteSpace(dto.ReferralDiscountKind))
+        if (dto.UserId.HasValue && !string.IsNullOrWhiteSpace(dto.ReferralDiscountKind))
         {
-            await _referralService.ApplyReferralDiscountToOrderAsync(
+            var kind = dto.ReferralDiscountKind.Trim();
+            var referralId = await _referralService.ResolveReferralIdForCheckoutAsync(
                 dto.UserId.Value,
-                order.Id,
-                dto.ReferralDiscountReferralId.Value,
-                dto.ReferralDiscountKind.Trim(),
-                totalAmount);
+                kind,
+                dto.ReferralDiscountReferralId);
+
+            if (referralId.HasValue)
+            {
+                await _referralService.ApplyReferralDiscountToOrderAsync(
+                    dto.UserId.Value,
+                    order.Id,
+                    referralId.Value,
+                    kind,
+                    totalAmount);
+            }
         }
 
         // Отправляем email

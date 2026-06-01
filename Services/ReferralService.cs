@@ -65,6 +65,13 @@ public class ReferralService : IReferralService
             .ToListAsync(ct);
 
         var canApply = await CanApplyReferrerCodeAsync(userId, ct);
+        var hasOrders = await UserHasNonCancelledOrdersAsync(userId, excludeOrderId: null, ct);
+        var referredDiscountAvailable = !hasOrders
+            && asReferred != null
+            && asReferred.ReferredDiscountOrderId == null
+            && asReferred.Status != ReferralStatus.Pending;
+
+        var cartDiscountOptions = await GetCartReferralDiscountOptionsAsync(userId, ct);
 
         return new MyReferralInfoDto
         {
@@ -74,14 +81,18 @@ public class ReferralService : IReferralService
                 ? null
                 : new ReferredByInfoDto
                 {
+                    ReferralId = asReferred.Id,
                     Code = asReferred.ReferralCode?.Code ?? string.Empty,
                     ReferrerName = asReferred.ReferrerUser?.FullName ?? asReferred.ReferrerUser?.Username,
                     Status = MapStatusLabel(asReferred.Status),
                     AppliedAt = asReferred.RegisteredAt ?? asReferred.CreatedAt,
                     DiscountUsed = asReferred.ReferredDiscountOrderId != null
                 },
+            ReferredDiscountAvailable = referredDiscountAvailable,
+            HasPriorOrders = hasOrders,
             CanApplyReferrerCode = canApply,
             InvitedCount = invited.Count,
+            CartDiscountOptions = cartDiscountOptions,
             Invited = invited.Select(r => new MyReferralInviteDto
             {
                 Id = r.Id,
@@ -223,6 +234,32 @@ public class ReferralService : IReferralService
         }
 
         return options;
+    }
+
+    public async Task<int?> ResolveReferralIdForCheckoutAsync(
+        int userId,
+        string kind,
+        int? referralId,
+        CancellationToken ct = default)
+    {
+        if (referralId is > 0)
+            return referralId;
+
+        await DbSchemaBootstrap.EnsureReferralsReadyAsync(_context, _logger, ct);
+
+        var normalizedKind = kind?.Trim() ?? string.Empty;
+        if (normalizedKind == ReferralDiscountKind.Referred)
+        {
+            var asReferred = await _context.Referrals
+                .AsNoTracking()
+                .FirstOrDefaultAsync(r =>
+                    r.ReferredUserId == userId &&
+                    r.ReferredDiscountOrderId == null &&
+                    r.Status != ReferralStatus.Pending, ct);
+            return asReferred?.Id;
+        }
+
+        return null;
     }
 
     public async Task ApplyReferralDiscountToOrderAsync(

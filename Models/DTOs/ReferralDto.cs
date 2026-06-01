@@ -5,14 +5,21 @@ public class MyReferralInfoDto
     public string? MyCode { get; set; }
     public bool CanGenerateCode { get; set; }
     public ReferredByInfoDto? ReferredBy { get; set; }
+    /// <summary>True if 10% first-order discount (as invited user) can still be applied at checkout.</summary>
+    public bool ReferredDiscountAvailable { get; set; }
+    /// <summary>True if user already has any non-cancelled order on the site.</summary>
+    public bool HasPriorOrders { get; set; }
     public bool CanApplyReferrerCode { get; set; }
     public int InvitedCount { get; set; }
     public List<MyReferralInviteDto> Invited { get; set; } = new();
+    /// <summary>Available checkout discounts (same as GET …/cart-discounts).</summary>
+    public List<CartReferralDiscountOptionDto> CartDiscountOptions { get; set; } = new();
     public string Rules { get; set; } = string.Empty;
 }
 
 public class ReferredByInfoDto
 {
+    public int ReferralId { get; set; }
     public string Code { get; set; } = string.Empty;
     public string? ReferrerName { get; set; }
     public string Status { get; set; } = string.Empty;

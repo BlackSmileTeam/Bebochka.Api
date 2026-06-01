@@ -6,6 +6,8 @@
 mysql -u USER -p bebochka < Database/migration_referrals.sql
 mysql -u USER -p bebochka < Database/migration_profile_autofilter_and_referrals.sql
 mysql -u USER -p bebochka < Database/migration_referral_checkout_discount.sql
+
+Диагностика скидки приглашённого: `check_referral_user_orders.sql`
 mysql -u USER -p bebochka < Database/migration_product_catalog_helpers.sql
 ```
 
