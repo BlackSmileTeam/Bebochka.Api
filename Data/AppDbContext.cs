@@ -87,6 +87,7 @@ public class AppDbContext : DbContext
     public DbSet<ProductColor> ProductColors { get; set; }
     public DbSet<ProductCondition> ProductConditions { get; set; }
     public DbSet<ProductNuance> ProductNuances { get; set; }
+    public DbSet<UserFavoriteProduct> UserFavoriteProducts { get; set; }
 
     /// <summary>
     /// Configures the entity models and their relationships
@@ -428,6 +429,22 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(100);
             entity.HasIndex(e => e.Name).IsUnique();
+        });
+
+        modelBuilder.Entity<UserFavoriteProduct>(entity =>
+        {
+            entity.ToTable("user_favorite_products");
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.UserId, e.ProductId }).IsUnique();
+            entity.HasIndex(e => e.CreatedAt);
+            entity.HasOne(e => e.User)
+                .WithMany()
+                .HasForeignKey(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Product)
+                .WithMany()
+                .HasForeignKey(e => e.ProductId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // После всех конфигураций — единый нижний регистр имён таблиц (как products, users, orders).

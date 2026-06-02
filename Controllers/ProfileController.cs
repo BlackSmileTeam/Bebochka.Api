@@ -285,6 +285,67 @@ public class ProfileController : ControllerBase
         return Ok(await _referralService.GetMyReferralInfoAsync(userId.Value));
     }
 
+    [HttpGet("favorites")]
+    [ProducesResponseType(typeof(List<int>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<List<int>>> GetMyFavorites()
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+
+        var ids = await _context.UserFavoriteProducts
+            .AsNoTracking()
+            .Where(x => x.UserId == userId.Value)
+            .OrderByDescending(x => x.CreatedAt)
+            .Select(x => x.ProductId)
+            .ToListAsync();
+
+        return Ok(ids);
+    }
+
+    [HttpPost("favorites/{productId:int}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult> AddToFavorites(int productId)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+
+        var exists = await _context.Products
+            .AsNoTracking()
+            .AnyAsync(p => p.Id == productId);
+        if (!exists) return NotFound(new { message = "Товар не найден" });
+
+        var hasAlready = await _context.UserFavoriteProducts
+            .AnyAsync(x => x.UserId == userId.Value && x.ProductId == productId);
+        if (hasAlready) return Ok(new { productId, isFavorite = true });
+
+        _context.UserFavoriteProducts.Add(new UserFavoriteProduct
+        {
+            UserId = userId.Value,
+            ProductId = productId,
+            CreatedAt = DateTime.UtcNow
+        });
+        await _context.SaveChangesAsync();
+        return Ok(new { productId, isFavorite = true });
+    }
+
+    [HttpDelete("favorites/{productId:int}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult> RemoveFromFavorites(int productId)
+    {
+        var userId = GetCurrentUserId();
+        if (userId == null) return Unauthorized();
+
+        var row = await _context.UserFavoriteProducts
+            .FirstOrDefaultAsync(x => x.UserId == userId.Value && x.ProductId == productId);
+        if (row != null)
+        {
+            _context.UserFavoriteProducts.Remove(row);
+            await _context.SaveChangesAsync();
+        }
+        return Ok(new { productId, isFavorite = false });
+    }
+
     [HttpPost("referral/code")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     public async Task<ActionResult> GenerateMyReferralCode()
