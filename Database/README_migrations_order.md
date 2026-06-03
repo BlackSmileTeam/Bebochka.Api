@@ -10,6 +10,7 @@ mysql -u USER -p bebochka < Database/migration_referral_checkout_discount.sql
 Диагностика скидки приглашённого: `check_referral_user_orders.sql`
 mysql -u USER -p bebochka < Database/migration_product_catalog_helpers.sql
 mysql -u USER -p bebochka < Database/migration_favorites.sql
+mysql -u USER -p bebochka < Database/migration_telegram_errors_image_count.sql
 ```
 
 Если реферальные таблицы уже есть — шаг 1 можно пропустить.  

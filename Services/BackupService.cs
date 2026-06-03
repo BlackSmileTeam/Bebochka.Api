@@ -116,9 +116,9 @@ public class BackupService
                     .Where(e => e.ErrorDate >= fromUtc && e.ErrorDate <= toUtc)
                     .ToListAsync(ct);
             }
-            catch (Exception ex) when (IsMissingTelegramErrorsTable(ex))
+            catch (Exception ex) when (IsTelegramErrorsUnavailable(ex))
             {
-                // Old production DBs may not have this table yet; backup should still finish.
+                // Старая схема: нет таблицы или колонки ImageCount — бэкап без ошибок Telegram.
                 telegramErrors = new List<TelegramError>();
             }
 
@@ -277,10 +277,20 @@ public class BackupService
         return list;
     }
 
-    private static bool IsMissingTelegramErrorsTable(Exception ex)
+    private static bool IsTelegramErrorsUnavailable(Exception ex)
     {
-        if (ex is MySqlException mySqlEx && mySqlEx.Message.Contains("telegramerrors", StringComparison.OrdinalIgnoreCase))
-            return true;
-        return ex.Message.Contains("telegramerrors", StringComparison.OrdinalIgnoreCase);
+        for (var current = ex; current != null; current = current.InnerException)
+        {
+            var msg = current.Message;
+            if (msg.Contains("telegramerrors", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (msg.Contains("ImageCount", StringComparison.OrdinalIgnoreCase)
+                && msg.Contains("Unknown column", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (current is MySqlException { ErrorCode: 1054 })
+                return msg.Contains("ImageCount", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
     }
 }
