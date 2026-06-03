@@ -1,9 +1,9 @@
--- TelegramErrors: создать таблицу, если её нет; добавить ImageCount, если колонки нет.
+-- TelegramErrors: создать таблицу (нижний регистр на Linux) и колонку ImageCount.
 -- Идемпотентно: безопасно запускать повторно.
 
 USE bebochka;
 
-CREATE TABLE IF NOT EXISTS TelegramErrors (
+CREATE TABLE IF NOT EXISTS telegramerrors (
     Id INT AUTO_INCREMENT PRIMARY KEY,
     ErrorDate DATETIME NOT NULL,
     Message VARCHAR(1000) NOT NULL,
@@ -17,18 +17,32 @@ CREATE TABLE IF NOT EXISTS TelegramErrors (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET @db := DATABASE();
-SET @has_col := (
-    SELECT COUNT(*)
-    FROM information_schema.COLUMNS
+SET @table_name := (
+    SELECT TABLE_NAME
+    FROM information_schema.TABLES
     WHERE TABLE_SCHEMA = @db
-      AND TABLE_NAME = 'TelegramErrors'
-      AND COLUMN_NAME = 'ImageCount'
+      AND LOWER(TABLE_NAME) = 'telegramerrors'
+    LIMIT 1
+);
+
+SET @has_col := IF(
+    @table_name IS NULL,
+    1,
+    (
+        SELECT COUNT(*)
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = @db
+          AND TABLE_NAME = @table_name
+          AND COLUMN_NAME = 'ImageCount'
+    )
 );
 
 SET @sql := IF(
-    @has_col = 0,
-    'ALTER TABLE TelegramErrors ADD COLUMN ImageCount INT NULL AFTER ProductInfo',
-    'SELECT ''ImageCount already exists'' AS info'
+    @table_name IS NULL OR @has_col > 0,
+    'SELECT ''ImageCount already exists or table missing'' AS info',
+    CONCAT(
+        'ALTER TABLE `', @table_name, '` ADD COLUMN ImageCount INT NULL AFTER ProductInfo'
+    )
 );
 
 PREPARE stmt FROM @sql;

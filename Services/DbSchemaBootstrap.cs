@@ -167,38 +167,46 @@ public static class DbSchemaBootstrap
         ILogger logger,
         CancellationToken ct)
     {
-        var exists = await ScalarIntAsync(db,
-            """
-            SELECT COUNT(*)
-            FROM information_schema.TABLES
-            WHERE TABLE_SCHEMA = DATABASE()
-              AND LOWER(TABLE_NAME) = 'telegramerrors'
-            """, ct);
+        var exists = await TableExistsAsync(db, "telegramerrors", ct);
 
-        if (exists > 0)
+        if (!exists)
         {
-            logger.LogInformation("Table telegramerrors already exists");
+            logger.LogWarning("Creating table telegramerrors");
+
+            await db.Database.ExecuteSqlRawAsync(
+                """
+                CREATE TABLE telegramerrors (
+                  Id INT AUTO_INCREMENT PRIMARY KEY,
+                  Message VARCHAR(2000) NOT NULL,
+                  Details TEXT NULL,
+                  ErrorType VARCHAR(100) NOT NULL,
+                  ProductInfo VARCHAR(1000) NULL,
+                  ImageCount INT NULL,
+                  ChannelId VARCHAR(100) NULL,
+                  ErrorDate DATETIME NOT NULL,
+                  INDEX IX_TelegramErrors_ErrorDate (ErrorDate),
+                  INDEX IX_TelegramErrors_ErrorType (ErrorType)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """, ct);
+
+            logger.LogInformation("Table telegramerrors created");
             return;
         }
 
-        logger.LogWarning("Creating table telegramerrors");
-
-        await db.Database.ExecuteSqlRawAsync(
+        var tableName = await ScalarStringAsync(db,
             """
-            CREATE TABLE telegramerrors (
-              Id INT AUTO_INCREMENT PRIMARY KEY,
-              Message VARCHAR(2000) NOT NULL,
-              Details TEXT NULL,
-              ErrorType VARCHAR(100) NOT NULL,
-              ProductInfo VARCHAR(1000) NULL,
-              ChannelId VARCHAR(100) NULL,
-              ErrorDate DATETIME NOT NULL,
-              INDEX IX_TelegramErrors_ErrorDate (ErrorDate),
-              INDEX IX_TelegramErrors_ErrorType (ErrorType)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            SELECT TABLE_NAME
+            FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE()
+              AND LOWER(TABLE_NAME) = 'telegramerrors'
+            LIMIT 1
             """, ct);
 
-        logger.LogInformation("Table telegramerrors created");
+        if (string.IsNullOrEmpty(tableName))
+            return;
+
+        logger.LogInformation("Table telegramerrors already exists");
+        await EnsureColumnAsync(db, logger, tableName, "ImageCount", "INT NULL", ct);
     }
 
     private static async Task EnsureMiscExpensesNullableShipmentAsync(
