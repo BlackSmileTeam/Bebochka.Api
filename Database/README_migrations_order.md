@@ -11,6 +11,7 @@ mysql -u USER -p bebochka < Database/migration_referral_checkout_discount.sql
 mysql -u USER -p bebochka < Database/migration_product_catalog_helpers.sql
 mysql -u USER -p bebochka < Database/migration_favorites.sql
 mysql -u USER -p bebochka < Database/migration_telegram_errors_image_count.sql
+# (создаёт TelegramErrors, если таблицы не было, и добавляет ImageCount при необходимости)
 ```
 
 Если реферальные таблицы уже есть — шаг 1 можно пропустить.  
