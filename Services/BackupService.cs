@@ -287,7 +287,7 @@ public class BackupService
             if (msg.Contains("ImageCount", StringComparison.OrdinalIgnoreCase)
                 && msg.Contains("Unknown column", StringComparison.OrdinalIgnoreCase))
                 return true;
-            if (current is MySqlException { ErrorCode: 1054 })
+            if (current is MySqlException mysql && mysql.Number == 1054)
                 return msg.Contains("ImageCount", StringComparison.OrdinalIgnoreCase);
         }
 
