@@ -212,6 +212,7 @@ builder.Services.AddAuthorization();
         builder.Services.AddMemoryCache();
 
         // Add services
+        builder.Services.AddScoped<IProductKitService, ProductKitService>();
         builder.Services.AddScoped<IProductService, ProductService>();
         builder.Services.AddScoped<IAuthService, AuthService>();
         builder.Services.AddScoped<WebReserveQueueService>();

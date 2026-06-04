@@ -19,6 +19,9 @@ public class AddToCartDto
     /// Gets or sets the quantity to add
     /// </summary>
     public int Quantity { get; set; } = 1;
+
+    /// <summary>part — одна вещь комплекта; bundle — весь комплект.</summary>
+    public string? AddMode { get; set; }
 }
 
 /// <summary>
@@ -94,5 +97,11 @@ public class CartItemDto
     /// Gets or sets the creation date
     /// </summary>
     public DateTime CreatedAt { get; set; }
+
+    public int? KitId { get; set; }
+    public string? CartAddMode { get; set; }
+    public string? KitBundleKey { get; set; }
+    public string? KitPartName { get; set; }
+    public bool IsKitDisplayLine { get; set; }
 }
 

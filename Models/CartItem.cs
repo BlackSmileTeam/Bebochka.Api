@@ -29,6 +29,20 @@ public class CartItem
     /// Gets or sets the product ID
     /// </summary>
     public int ProductId { get; set; }
+
+    /// <summary>Комплект, если позиция относится к комплекту.</summary>
+    public int? KitId { get; set; }
+
+    public ProductKit? Kit { get; set; }
+
+    /// <summary>part — одна вещь; bundle — весь комплект.</summary>
+    public string? CartAddMode { get; set; }
+
+    /// <summary>Группирует строки одного добавления комплекта целиком.</summary>
+    public string? KitBundleKey { get; set; }
+
+    /// <summary>Цена за единицу в корзине (комплект или часть).</summary>
+    public decimal? ChargedUnitPrice { get; set; }
     
     /// <summary>
     /// Gets or sets the product navigation property

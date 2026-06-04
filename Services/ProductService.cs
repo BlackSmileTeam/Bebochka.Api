@@ -18,14 +18,16 @@ public class ProductService : IProductService
     };
 
     private readonly AppDbContext _context;
+    private readonly IProductKitService _kitService;
 
     /// <summary>
     /// Initializes a new instance of the ProductService class
     /// </summary>
     /// <param name="context">Database context</param>
-    public ProductService(AppDbContext context)
+    public ProductService(AppDbContext context, IProductKitService kitService)
     {
         _context = context;
+        _kitService = kitService;
     }
 
     /// <summary>
@@ -38,7 +40,8 @@ public class ProductService : IProductService
     {
         var moscowNow = DateTimeHelper.GetMoscowTime();
         var products = await _context.Products
-            .Where(p => p.PublishedAt == null || p.PublishedAt <= moscowNow) // Only show published products (compare with Moscow time)
+            .Where(p => (p.PublishedAt == null || p.PublishedAt <= moscowNow)
+                && (!p.KitId.HasValue || p.IsKitDisplay))
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 
@@ -100,7 +103,9 @@ public class ProductService : IProductService
 
         var moscowNow = DateTimeHelper.GetMoscowTime();
         var allVisible = await _context.Products
-            .Where(p => p.QuantityInStock > 0 && (p.PublishedAt == null || p.PublishedAt <= moscowNow))
+            .Where(p => p.QuantityInStock > 0
+                && (p.PublishedAt == null || p.PublishedAt <= moscowNow)
+                && (!p.KitId.HasValue || p.IsKitDisplay))
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 
@@ -301,11 +306,14 @@ public class ProductService : IProductService
     {
         var moscowNow = DateTimeHelper.GetMoscowTime();
         var product = await _context.Products
-            .Where(p => p.Id == id && (p.PublishedAt == null || p.PublishedAt <= moscowNow))
+            .Where(p => p.Id == id
+                && (p.PublishedAt == null || p.PublishedAt <= moscowNow)
+                && (!p.KitId.HasValue || p.IsKitDisplay))
             .FirstOrDefaultAsync();
         if (product == null) return null;
 
         var dto = MapToDto(product);
+        await _kitService.EnrichProductDtoAsync(dto, sessionId, currentUserId);
 
         // Вычисляем зарезервированное количество для этого товара
         var rq = _context.CartItems.Where(c => c.ProductId == id);
@@ -332,6 +340,12 @@ public class ProductService : IProductService
     /// <returns>Created product</returns>
     public async Task<ProductDto> CreateProductAsync(CreateProductDto dto, List<string> imagePaths)
     {
+        if (dto.IsKit)
+        {
+            dto.Owner = NormalizeOwnerOrThrow(dto.Owner);
+            return await _kitService.CreateKitAsync(dto, imagePaths);
+        }
+
         var normalizedOwner = NormalizeOwnerOrThrow(dto.Owner);
 
         // PublishedAt from frontend is already in Moscow time format, store it directly
@@ -375,6 +389,14 @@ public class ProductService : IProductService
     {
         var product = await _context.Products.FindAsync(id);
         if (product == null) return null;
+
+        if (product.KitId.HasValue && product.IsKitDisplay && dto.IsKit)
+        {
+            if (dto.Owner != null)
+                dto.Owner = NormalizeOwnerOrThrow(dto.Owner);
+            return await _kitService.UpdateKitAsync(id, dto, imagePaths);
+        }
+
         var normalizedOwner = NormalizeOwnerOrThrow(dto.Owner);
 
         // Only update fields that are provided in DTO (non-empty/non-null)
@@ -459,6 +481,15 @@ public class ProductService : IProductService
         var product = await _context.Products.FindAsync(id);
         if (product == null)
             return ProductDeleteResult.NotFound;
+
+        if (product.KitId.HasValue)
+        {
+            var kitProductIds = await _kitService.GetKitProductIdsAsync(product.KitId.Value);
+            if (await _context.OrderItems.AnyAsync(oi => kitProductIds.Contains(oi.ProductId)))
+                return ProductDeleteResult.ReferencedInOrders;
+            await _kitService.DeleteKitByProductIdAsync(id);
+            return ProductDeleteResult.Deleted;
+        }
 
         if (await _context.OrderItems.AnyAsync(oi => oi.ProductId == id))
             return ProductDeleteResult.ReferencedInOrders;
@@ -552,7 +583,9 @@ public class ProductService : IProductService
             Owner = product.Owner,
             IncomingShipmentId = product.IncomingShipmentId,
             CreatedAt = product.CreatedAt,
-            UpdatedAt = product.UpdatedAt
+            UpdatedAt = product.UpdatedAt,
+            KitId = product.KitId,
+            IsKit = product.KitId.HasValue,
         };
     }
 
@@ -596,6 +629,7 @@ public class ProductService : IProductService
     public async Task<List<ProductDto>> GetAllProductsForAdminAsync()
     {
         var products = await _context.Products
+            .Where(p => !p.KitId.HasValue || p.IsKitDisplay)
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 
@@ -611,15 +645,20 @@ public class ProductService : IProductService
             .Where(s => shipmentIds.Contains(s.Id))
             .ToDictionaryAsync(s => s.Id, s => s.Name);
 
-        return products.Select(p =>
+        var result = new List<ProductDto>();
+        foreach (var p in products)
         {
             var dto = MapToDto(p);
             var reserved = reservedQuantities.GetValueOrDefault(p.Id, 0);
             dto.AvailableQuantity = Math.Max(0, p.QuantityInStock - reserved);
             if (p.IncomingShipmentId.HasValue)
                 dto.IncomingShipmentName = shipmentNames.GetValueOrDefault(p.IncomingShipmentId.Value);
-            return dto;
-        }).ToList();
+            if (p.KitId.HasValue)
+                await _kitService.EnrichProductDtoAsync(dto, null, null);
+            result.Add(dto);
+        }
+
+        return result;
     }
     
     /// <summary>

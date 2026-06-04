@@ -20,6 +20,7 @@ public class AppDbContext : DbContext
     /// Gets or sets the Products database set
     /// </summary>
     public DbSet<Product> Products { get; set; }
+    public DbSet<ProductKit> ProductKits { get; set; }
     
     /// <summary>
     /// Gets or sets the Users database set
@@ -126,6 +127,20 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.IncomingShipmentId)
                 .OnDelete(DeleteBehavior.SetNull);
+            entity.Property(e => e.KitPartName).HasMaxLength(200);
+            entity.HasIndex(e => e.KitId);
+            entity.HasIndex(e => e.IsKitDisplay);
+            entity.HasOne(e => e.Kit)
+                .WithMany(k => k.Products)
+                .HasForeignKey(e => e.KitId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<ProductKit>(entity =>
+        {
+            entity.ToTable("product_kits");
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.KitPrice).HasColumnType("decimal(10,2)");
         });
 
         modelBuilder.Entity<User>(entity =>
@@ -163,6 +178,15 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(e => e.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+            entity.Property(e => e.CartAddMode).HasMaxLength(16);
+            entity.Property(e => e.KitBundleKey).HasMaxLength(36);
+            entity.Property(e => e.ChargedUnitPrice).HasColumnType("decimal(10,2)");
+            entity.HasIndex(e => e.KitId);
+            entity.HasIndex(e => e.KitBundleKey);
+            entity.HasOne(e => e.Kit)
+                .WithMany()
+                .HasForeignKey(e => e.KitId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         modelBuilder.Entity<Order>(entity =>

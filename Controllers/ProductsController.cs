@@ -23,6 +23,7 @@ public class ProductsController : ControllerBase
     private readonly IConfiguration _configuration;
     private readonly IAuthService _authService;
     private readonly LookupItemsService _lookupItemsService;
+    private readonly IProductKitService _productKitService;
 
     /// <summary>
     /// Initializes a new instance of the ProductsController class
@@ -34,7 +35,8 @@ public class ProductsController : ControllerBase
         AppDbContext context,
         IConfiguration configuration,
         IAuthService authService,
-        LookupItemsService lookupItemsService)
+        LookupItemsService lookupItemsService,
+        IProductKitService productKitService)
     {
         _productService = productService;
         _environment = environment;
@@ -43,6 +45,7 @@ public class ProductsController : ControllerBase
         _configuration = configuration;
         _authService = authService;
         _lookupItemsService = lookupItemsService;
+        _productKitService = productKitService;
     }
 
     private async Task<int?> TryGetUserIdFromBearerAsync()
@@ -130,6 +133,21 @@ public class ProductsController : ControllerBase
             sort,
             includeFacets);
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Варианты комплекта для карточки товара (части, бронь, цены).
+    /// </summary>
+    [HttpGet("{id:int}/kit-options")]
+    [ProducesResponseType(typeof(ProductKitOptionsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ProductKitOptionsDto>> GetProductKitOptions(int id, [FromQuery] string? sessionId = null)
+    {
+        var uid = await TryGetUserIdFromBearerAsync();
+        var options = await _productKitService.GetKitOptionsAsync(id, sessionId, uid);
+        if (options == null)
+            return NotFound();
+        return Ok(options);
     }
 
     /// <summary>

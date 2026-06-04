@@ -21,11 +21,13 @@ public class CartController : ControllerBase
 {
     private readonly AppDbContext _context;
     private readonly WebReserveQueueService _queueService;
+    private readonly IProductKitService _kitService;
 
-    public CartController(AppDbContext context, WebReserveQueueService queueService)
+    public CartController(AppDbContext context, WebReserveQueueService queueService, IProductKitService kitService)
     {
         _context = context;
         _queueService = queueService;
+        _kitService = kitService;
     }
 
     private int? GetUserIdFromJwt()
@@ -91,23 +93,27 @@ public class CartController : ControllerBase
         else
             query = query.Where(c => c.SessionId == sessionId && c.UserId == null);
 
-        var cartItems = await query
-            .Select(c => new CartItemDto
-            {
-                Id = c.Id,
-                ProductId = c.ProductId,
-                ProductName = c.Product!.Name,
-                ProductPrice = c.Product.Price,
-                ProductBrand = c.Product.Brand,
-                ProductSize = c.Product.Size,
-                ProductColor = c.Product.Color,
-                ProductImages = c.Product.Images ?? new List<string>(),
-                Quantity = c.Quantity,
-                CreatedAt = c.CreatedAt
-            })
-            .ToListAsync();
+        var cartItems = await query.ToListAsync();
+        var dtos = cartItems.Select(c => new CartItemDto
+        {
+            Id = c.Id,
+            ProductId = c.ProductId,
+            ProductName = c.Product!.Name,
+            ProductPrice = c.ChargedUnitPrice ?? c.Product.Price,
+            ProductBrand = c.Product.Brand,
+            ProductSize = c.Product.Size,
+            ProductColor = c.Product.Color,
+            ProductImages = c.Product.Images ?? new List<string>(),
+            Quantity = c.Quantity,
+            CreatedAt = c.CreatedAt,
+            KitId = c.KitId,
+            CartAddMode = c.CartAddMode,
+            KitBundleKey = c.KitBundleKey,
+            KitPartName = c.Product.KitPartName,
+            IsKitDisplayLine = c.Product.IsKitDisplay,
+        }).ToList();
 
-        return Ok(cartItems);
+        return Ok(dtos);
     }
 
     /// <summary>
@@ -160,6 +166,10 @@ public class CartController : ControllerBase
         var userId = GetUserIdFromJwt();
         if (!userId.HasValue && string.IsNullOrEmpty(dto.SessionId))
             return BadRequest(new { message = "SessionId is required for guests" });
+
+        var addMode = (dto.AddMode ?? string.Empty).Trim().ToLowerInvariant();
+        if (addMode == ProductKitService.CartAddModeBundle)
+            return await AddKitBundleToCartAsync(dto, userId);
 
         var strategy = _context.Database.CreateExecutionStrategy();
         CartItem? savedCartItem = null;
@@ -241,6 +251,9 @@ public class CartController : ControllerBase
                         UserId = userId,
                         ProductId = dto.ProductId,
                         Quantity = quantityToAdd,
+                        KitId = product.KitId,
+                        CartAddMode = product.KitId.HasValue ? ProductKitService.CartAddModePart : null,
+                        ChargedUnitPrice = product.Price,
                         CreatedAt = DateTime.UtcNow,
                         UpdatedAt = DateTime.UtcNow
                     };
@@ -270,13 +283,151 @@ public class CartController : ControllerBase
             Id = savedCartItem.Id,
             ProductId = savedCartItem.ProductId,
             ProductName = savedCartItem.Product!.Name,
-            ProductPrice = savedCartItem.Product.Price,
+            ProductPrice = savedCartItem.ChargedUnitPrice ?? savedCartItem.Product.Price,
             ProductBrand = savedCartItem.Product.Brand,
             ProductSize = savedCartItem.Product.Size,
             ProductColor = savedCartItem.Product.Color,
             ProductImages = savedCartItem.Product.Images ?? new List<string>(),
             Quantity = savedCartItem.Quantity,
-            CreatedAt = savedCartItem.CreatedAt
+            CreatedAt = savedCartItem.CreatedAt,
+            KitId = savedCartItem.KitId,
+            CartAddMode = savedCartItem.CartAddMode,
+            KitBundleKey = savedCartItem.KitBundleKey,
+            KitPartName = savedCartItem.Product.KitPartName,
+            IsKitDisplayLine = savedCartItem.Product.IsKitDisplay,
+        };
+
+        return CreatedAtAction(nameof(GetCartItems), new { sessionId = dto.SessionId }, cartItemDto);
+    }
+
+    private async Task<ActionResult<CartItemDto>> AddKitBundleToCartAsync(AddToCartDto dto, int? userId)
+    {
+        var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == dto.ProductId);
+        if (product?.KitId == null)
+            return BadRequest(new { message = "Товар не является комплектом", code = "NOT_A_KIT" });
+
+        var kitId = product.KitId.Value;
+        var kit = await _context.ProductKits.FindAsync(kitId);
+        if (kit == null)
+            return NotFound(new { message = "Комплект не найден" });
+
+        var kitProducts = await _context.Products
+            .Where(p => p.KitId == kitId)
+            .OrderBy(p => p.IsKitDisplay ? 0 : 1)
+            .ThenBy(p => p.KitPartSortOrder)
+            .ToListAsync();
+
+        if (kitProducts.Count == 0)
+            return BadRequest(new { message = "Состав комплекта пуст" });
+
+        var moscowNow = DateTimeHelper.GetMoscowTime();
+        var display = kitProducts.FirstOrDefault(p => p.IsKitDisplay) ?? product;
+        if (display.CartAvailableAt.HasValue && display.CartAvailableAt.Value > moscowNow)
+            return BadRequest(new { message = "Добавление в корзину будет доступно позже", cartLockedUntil = display.CartAvailableAt });
+
+        var kitProductIds = kitProducts.Select(p => p.Id).ToList();
+        var options = await _kitService.GetKitOptionsAsync(display.Id, dto.SessionId, userId);
+        if (options == null || !options.CanAddFullKit)
+            return BadRequest(new { message = "Не все вещи комплекта доступны", code = "KIT_PART_RESERVED" });
+
+        var sessionKey = userId.HasValue ? SessionKeyForUser(userId.Value) : dto.SessionId;
+        var bundleKey = Guid.NewGuid().ToString("N");
+        CartItem? firstLine = null;
+
+        try
+        {
+            var strategy = _context.Database.CreateExecutionStrategy();
+            await strategy.ExecuteAsync(async () =>
+            {
+                await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+                try
+                {
+                    foreach (var pid in kitProductIds)
+                    {
+                        await _context.Database.ExecuteSqlInterpolatedAsync(
+                            $"SELECT `Id` FROM `products` WHERE `Id` = {pid} FOR UPDATE");
+                    }
+
+                    foreach (var kp in kitProducts)
+                    {
+                        var reservedQuery = _context.CartItems.Where(c => c.ProductId == kp.Id);
+                        if (userId.HasValue)
+                            reservedQuery = reservedQuery.Where(c => c.UserId == null || c.UserId != userId.Value);
+                        else
+                            reservedQuery = reservedQuery.Where(c => c.UserId != null || c.SessionId != dto.SessionId);
+                        var reserved = await reservedQuery.SumAsync(c => (int?)c.Quantity) ?? 0;
+                        if (kp.QuantityInStock - reserved <= 0)
+                            throw new InvalidOperationException("KIT_PART_RESERVED");
+
+                        var existing = await _context.CartItems.FirstOrDefaultAsync(c =>
+                            c.ProductId == kp.Id &&
+                            (userId.HasValue ? c.UserId == userId : c.SessionId == dto.SessionId && c.UserId == null));
+                        if (existing != null)
+                            continue;
+
+                        var line = new CartItem
+                        {
+                            SessionId = sessionKey,
+                            UserId = userId,
+                            ProductId = kp.Id,
+                            Quantity = 1,
+                            KitId = kitId,
+                            CartAddMode = ProductKitService.CartAddModeBundle,
+                            KitBundleKey = bundleKey,
+                            ChargedUnitPrice = kp.IsKitDisplay ? kit.KitPrice : 0m,
+                            CreatedAt = DateTime.UtcNow,
+                            UpdatedAt = DateTime.UtcNow,
+                        };
+                        _context.CartItems.Add(line);
+                        firstLine ??= line;
+                    }
+
+                    await _context.SaveChangesAsync();
+                    await tx.CommitAsync();
+                }
+                catch
+                {
+                    await tx.RollbackAsync();
+                    throw;
+                }
+            });
+        }
+        catch (InvalidOperationException)
+        {
+            return BadRequest(new { message = "Не все вещи комплекта доступны", code = "KIT_PART_RESERVED" });
+        }
+
+        if (firstLine == null)
+        {
+            var existing = await _context.CartItems
+                .Include(c => c.Product)
+                .FirstOrDefaultAsync(c =>
+                    kitProductIds.Contains(c.ProductId) &&
+                    (userId.HasValue ? c.UserId == userId : c.SessionId == dto.SessionId && c.UserId == null));
+            if (existing == null)
+                return BadRequest(new { message = "Комплект уже в корзине или недоступен", code = "KIT_UNAVAILABLE" });
+            firstLine = existing;
+        }
+        else
+        {
+            await _context.Entry(firstLine).Reference(c => c.Product).LoadAsync();
+        }
+
+        var cartItemDto = new CartItemDto
+        {
+            Id = firstLine.Id,
+            ProductId = display.Id,
+            ProductName = display.Name,
+            ProductPrice = kit.KitPrice,
+            ProductBrand = display.Brand,
+            ProductSize = display.Size,
+            ProductColor = display.Color,
+            ProductImages = display.Images ?? new List<string>(),
+            Quantity = 1,
+            CreatedAt = firstLine.CreatedAt,
+            KitId = kitId,
+            CartAddMode = ProductKitService.CartAddModeBundle,
+            KitBundleKey = bundleKey,
         };
 
         return CreatedAtAction(nameof(GetCartItems), new { sessionId = dto.SessionId }, cartItemDto);

@@ -101,6 +101,11 @@ public class ProductDto
     public string? Owner { get; set; }
     public int? IncomingShipmentId { get; set; }
     public string? IncomingShipmentName { get; set; }
+
+    public bool IsKit { get; set; }
+    public int? KitId { get; set; }
+    public decimal? KitPrice { get; set; }
+    public List<ProductKitPartDto>? KitParts { get; set; }
 }
 
 /// <summary>
@@ -176,6 +181,9 @@ public class CreateProductDto
     public string? BoxNumber { get; set; }
     public string? Owner { get; set; }
     public int? IncomingShipmentId { get; set; }
+
+    public bool IsKit { get; set; }
+    public List<ProductKitPartInputDto>? KitParts { get; set; }
 }
 
 /// <summary>
@@ -256,4 +264,7 @@ public class UpdateProductDto
     public string? BoxNumber { get; set; }
     public string? Owner { get; set; }
     public int? IncomingShipmentId { get; set; }
+
+    public bool IsKit { get; set; }
+    public List<ProductKitPartInputDto>? KitParts { get; set; }
 }

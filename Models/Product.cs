@@ -150,4 +150,17 @@ public class Product
     /// Navigation property to incoming shipment.
     /// </summary>
     public IncomingShipment? IncomingShipment { get; set; }
+
+    /// <summary>Комплект: ссылка на запись в product_kits.</summary>
+    public int? KitId { get; set; }
+
+    public ProductKit? Kit { get; set; }
+
+    /// <summary>Название части комплекта (для строк без IsKitDisplay).</summary>
+    public string? KitPartName { get; set; }
+
+    public int KitPartSortOrder { get; set; }
+
+    /// <summary>Карточка в каталоге (основная позиция комплекта).</summary>
+    public bool IsKitDisplay { get; set; }
 }
