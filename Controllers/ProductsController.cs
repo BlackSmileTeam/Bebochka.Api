@@ -140,7 +140,7 @@ public class ProductsController : ControllerBase
     /// <returns>Product information</returns>
     /// <response code="200">Returns the requested product</response>
     /// <response code="404">Product not found</response>
-    [HttpGet("{id}")]
+    [HttpGet("{id:int}")]
     [ProducesResponseType(typeof(ProductDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ProductDto>> GetProduct(int id, [FromQuery] string? sessionId = null)
