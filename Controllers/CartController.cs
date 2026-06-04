@@ -46,6 +46,30 @@ public class CartController : ControllerBase
 
     private static string SessionKeyForUser(int userId) => $"uid:{userId}";
 
+    private async Task<bool> IsAdminUserAsync(int? userId)
+    {
+        if (!userId.HasValue)
+            return false;
+        return await _context.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == userId.Value && u.IsAdmin);
+    }
+
+    private static bool IsTestProductHiddenFromUser(Product? product, bool isAdmin) =>
+        product != null && product.IsTestProduct && !isAdmin;
+
+    /// <summary>Скрытые строки брони частей комплекта (в корзине виден только display-товар).</summary>
+    private static bool IsKitBundlePartLine(CartItem c) =>
+        c.CartAddMode == ProductKitService.CartAddModeBundle
+        && c.Product != null
+        && !c.Product.IsKitDisplay;
+
+    private static IQueryable<CartItem> FilterOwnCartLines(IQueryable<CartItem> query, int? userId, string? sessionId)
+    {
+        if (userId.HasValue)
+            return query.Where(c => c.UserId == userId.Value);
+        return query.Where(c => c.SessionId == sessionId && c.UserId == null);
+    }
+
     public class AdminCartItemDto
     {
         public int Id { get; set; }
@@ -87,6 +111,7 @@ public class CartController : ControllerBase
         if (!userId.HasValue && string.IsNullOrEmpty(sessionId))
             return BadRequest(new { message = "SessionId is required for guests" });
 
+        var isAdmin = await IsAdminUserAsync(userId);
         var query = _context.CartItems.Include(c => c.Product).AsQueryable();
         if (userId.HasValue)
             query = query.Where(c => c.UserId == userId.Value);
@@ -94,6 +119,9 @@ public class CartController : ControllerBase
             query = query.Where(c => c.SessionId == sessionId && c.UserId == null);
 
         var cartItems = await query.ToListAsync();
+        if (!isAdmin)
+            cartItems = cartItems.Where(c => c.Product == null || !c.Product.IsTestProduct).ToList();
+        cartItems = cartItems.Where(c => !IsKitBundlePartLine(c)).ToList();
         var dtos = cartItems.Select(c => new CartItemDto
         {
             Id = c.Id,
@@ -167,6 +195,7 @@ public class CartController : ControllerBase
         if (!userId.HasValue && string.IsNullOrEmpty(dto.SessionId))
             return BadRequest(new { message = "SessionId is required for guests" });
 
+        var isAdmin = await IsAdminUserAsync(userId);
         var addMode = (dto.AddMode ?? string.Empty).Trim().ToLowerInvariant();
         if (addMode == ProductKitService.CartAddModeBundle)
             return await AddKitBundleToCartAsync(dto, userId);
@@ -187,6 +216,13 @@ public class CartController : ControllerBase
 
                 var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == dto.ProductId);
                 if (product == null)
+                {
+                    earlyResult = NotFound(new { message = "Product not found" });
+                    await tx.RollbackAsync();
+                    return;
+                }
+
+                if (IsTestProductHiddenFromUser(product, isAdmin))
                 {
                     earlyResult = NotFound(new { message = "Product not found" });
                     await tx.RollbackAsync();
@@ -302,9 +338,13 @@ public class CartController : ControllerBase
 
     private async Task<ActionResult<CartItemDto>> AddKitBundleToCartAsync(AddToCartDto dto, int? userId)
     {
+        var isAdmin = await IsAdminUserAsync(userId);
         var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == dto.ProductId);
         if (product?.KitId == null)
             return BadRequest(new { message = "Товар не является комплектом", code = "NOT_A_KIT" });
+
+        if (IsTestProductHiddenFromUser(product, isAdmin))
+            return NotFound(new { message = "Product not found" });
 
         var kitId = product.KitId.Value;
         var kit = await _context.ProductKits.FindAsync(kitId);
@@ -348,6 +388,21 @@ public class CartController : ControllerBase
                             $"SELECT `Id` FROM `products` WHERE `Id` = {pid} FOR UPDATE");
                     }
 
+                    var existingForKit = await _context.CartItems
+                        .Where(c => kitProductIds.Contains(c.ProductId))
+                        .Where(c => userId.HasValue ? c.UserId == userId : c.SessionId == dto.SessionId && c.UserId == null)
+                        .ToListAsync();
+
+                    if (existingForKit.Any(c =>
+                            c.ProductId == display.Id
+                            && c.CartAddMode == ProductKitService.CartAddModeBundle))
+                    {
+                        throw new InvalidOperationException("KIT_ALREADY_IN_CART");
+                    }
+
+                    if (existingForKit.Count > 0)
+                        _context.CartItems.RemoveRange(existingForKit);
+
                     foreach (var kp in kitProducts)
                     {
                         var reservedQuery = _context.CartItems.Where(c => c.ProductId == kp.Id);
@@ -358,12 +413,6 @@ public class CartController : ControllerBase
                         var reserved = await reservedQuery.SumAsync(c => (int?)c.Quantity) ?? 0;
                         if (kp.QuantityInStock - reserved <= 0)
                             throw new InvalidOperationException("KIT_PART_RESERVED");
-
-                        var existing = await _context.CartItems.FirstOrDefaultAsync(c =>
-                            c.ProductId == kp.Id &&
-                            (userId.HasValue ? c.UserId == userId : c.SessionId == dto.SessionId && c.UserId == null));
-                        if (existing != null)
-                            continue;
 
                         var line = new CartItem
                         {
@@ -379,7 +428,8 @@ public class CartController : ControllerBase
                             UpdatedAt = DateTime.UtcNow,
                         };
                         _context.CartItems.Add(line);
-                        firstLine ??= line;
+                        if (kp.IsKitDisplay)
+                            firstLine = line;
                     }
 
                     await _context.SaveChangesAsync();
@@ -392,6 +442,14 @@ public class CartController : ControllerBase
                 }
             });
         }
+        catch (InvalidOperationException ex) when (ex.Message == "KIT_PART_RESERVED")
+        {
+            return BadRequest(new { message = "Не все вещи комплекта доступны", code = "KIT_PART_RESERVED" });
+        }
+        catch (InvalidOperationException ex) when (ex.Message == "KIT_ALREADY_IN_CART")
+        {
+            return BadRequest(new { message = "Комплект уже в корзине", code = "KIT_ALREADY_IN_CART" });
+        }
         catch (InvalidOperationException)
         {
             return BadRequest(new { message = "Не все вещи комплекта доступны", code = "KIT_PART_RESERVED" });
@@ -399,14 +457,14 @@ public class CartController : ControllerBase
 
         if (firstLine == null)
         {
-            var existing = await _context.CartItems
+            firstLine = await _context.CartItems
                 .Include(c => c.Product)
                 .FirstOrDefaultAsync(c =>
-                    kitProductIds.Contains(c.ProductId) &&
-                    (userId.HasValue ? c.UserId == userId : c.SessionId == dto.SessionId && c.UserId == null));
-            if (existing == null)
+                    c.ProductId == display.Id
+                    && c.CartAddMode == ProductKitService.CartAddModeBundle
+                    && (userId.HasValue ? c.UserId == userId : c.SessionId == dto.SessionId && c.UserId == null));
+            if (firstLine == null)
                 return BadRequest(new { message = "Комплект уже в корзине или недоступен", code = "KIT_UNAVAILABLE" });
-            firstLine = existing;
         }
         else
         {
@@ -448,6 +506,9 @@ public class CartController : ControllerBase
 
         var product = await _context.Products.FindAsync(dto.ProductId);
         if (product == null)
+            return NotFound();
+
+        if (IsTestProductHiddenFromUser(product, await IsAdminUserAsync(userId)))
             return NotFound();
 
         var moscowNow = DateTimeHelper.GetMoscowTime();
@@ -624,11 +685,21 @@ public class CartController : ControllerBase
         else if (cartItem.UserId != null)
             return Forbid();
 
-        var productId = cartItem.ProductId;
-        _context.CartItems.Remove(cartItem);
+        var linesToRemove = new List<CartItem> { cartItem };
+        if (!string.IsNullOrEmpty(cartItem.KitBundleKey)
+            && cartItem.CartAddMode == ProductKitService.CartAddModeBundle)
+        {
+            var bundleQuery = _context.CartItems.Where(c => c.KitBundleKey == cartItem.KitBundleKey);
+            bundleQuery = FilterOwnCartLines(bundleQuery, userId, cartItem.SessionId);
+            linesToRemove = await bundleQuery.ToListAsync();
+        }
+
+        var productIds = linesToRemove.Select(c => c.ProductId).Distinct().ToList();
+        _context.CartItems.RemoveRange(linesToRemove);
         await _context.SaveChangesAsync();
 
-        await _queueService.PromoteNextAfterCartReleaseAsync(productId);
+        foreach (var pid in productIds)
+            await _queueService.PromoteNextAfterCartReleaseAsync(pid);
 
         return NoContent();
     }
@@ -646,11 +717,21 @@ public class CartController : ControllerBase
         if (cartItem == null)
             return NotFound();
 
-        var productId = cartItem.ProductId;
-        _context.CartItems.Remove(cartItem);
+        var linesToRemove = new List<CartItem> { cartItem };
+        if (!string.IsNullOrEmpty(cartItem.KitBundleKey)
+            && cartItem.CartAddMode == ProductKitService.CartAddModeBundle)
+        {
+            linesToRemove = await _context.CartItems
+                .Where(c => c.KitBundleKey == cartItem.KitBundleKey)
+                .ToListAsync();
+        }
+
+        var productIds = linesToRemove.Select(c => c.ProductId).Distinct().ToList();
+        _context.CartItems.RemoveRange(linesToRemove);
         await _context.SaveChangesAsync();
 
-        await _queueService.PromoteNextAfterCartReleaseAsync(productId);
+        foreach (var pid in productIds)
+            await _queueService.PromoteNextAfterCartReleaseAsync(pid);
         return NoContent();
     }
 

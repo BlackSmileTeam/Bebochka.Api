@@ -130,6 +130,8 @@ public class AppDbContext : DbContext
             entity.Property(e => e.KitPartName).HasMaxLength(200);
             entity.HasIndex(e => e.KitId);
             entity.HasIndex(e => e.IsKitDisplay);
+            entity.Property(e => e.IsTestProduct).HasDefaultValue(false);
+            entity.HasIndex(e => e.IsTestProduct);
             entity.HasOne(e => e.Kit)
                 .WithMany(k => k.Products)
                 .HasForeignKey(e => e.KitId)

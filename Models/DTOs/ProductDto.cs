@@ -106,6 +106,8 @@ public class ProductDto
     public int? KitId { get; set; }
     public decimal? KitPrice { get; set; }
     public List<ProductKitPartDto>? KitParts { get; set; }
+
+    public bool IsTestProduct { get; set; }
 }
 
 /// <summary>
@@ -184,6 +186,7 @@ public class CreateProductDto
 
     public bool IsKit { get; set; }
     public List<ProductKitPartInputDto>? KitParts { get; set; }
+    public bool IsTestProduct { get; set; }
 }
 
 /// <summary>
@@ -267,4 +270,5 @@ public class UpdateProductDto
 
     public bool IsKit { get; set; }
     public List<ProductKitPartInputDto>? KitParts { get; set; }
+    public bool IsTestProduct { get; set; }
 }

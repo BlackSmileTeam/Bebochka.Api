@@ -60,6 +60,7 @@ public class ProductKitService : IProductKitService
         }
 
         await _context.SaveChangesAsync();
+        await SyncKitTestFlagAsync(kit.Id, dto.IsTestProduct);
         return await MapDisplayProductDtoAsync(display, kit);
     }
 
@@ -129,6 +130,7 @@ public class ProductKitService : IProductKitService
         }
 
         await _context.SaveChangesAsync();
+        await SyncKitTestFlagAsync(kit.Id, dto.IsTestProduct);
         return await MapDisplayProductDtoAsync(display, kit);
     }
 
@@ -161,6 +163,9 @@ public class ProductKitService : IProductKitService
         if (product?.KitId == null)
             return null;
 
+        if (product.IsTestProduct && !await IsAdminUserAsync(currentUserId))
+            return null;
+
         var kitId = product.KitId.Value;
         var kit = await _context.ProductKits.AsNoTracking().FirstOrDefaultAsync(k => k.Id == kitId);
         if (kit == null)
@@ -177,8 +182,10 @@ public class ProductKitService : IProductKitService
             .ToListAsync();
 
         var allIds = parts.Select(p => p.Id).ToList();
+        var allKitIds = allIds.Append(display.Id).Distinct().ToList();
         var reserved = await GetReservedByOthersAsync(allIds, sessionId, currentUserId);
         var myCart = await GetMyCartByProductAsync(allIds, sessionId, currentUserId);
+        var myKitCart = await GetMyCartByProductAsync(allKitIds, sessionId, currentUserId);
 
         var partDtos = parts.Select(p =>
         {
@@ -201,7 +208,8 @@ public class ProductKitService : IProductKitService
             .ToList();
 
         var hasReservation = partDtos.Any(p => p.IsReservedByOthers);
-        var canAddFull = partDtos.Count > 0 && partDtos.All(p => !p.IsReservedByOthers);
+        var hasOwnFullKit = allKitIds.Count > 0 && allKitIds.All(id => myKitCart.GetValueOrDefault(id) > 0);
+        var canAddFull = partDtos.Count > 0 && partDtos.All(p => !p.IsReservedByOthers) && !hasOwnFullKit;
 
         return new ProductKitOptionsDto
         {
@@ -264,6 +272,7 @@ public class ProductKitService : IProductKitService
             BoxNumber = dto.BoxNumber,
             Owner = dto.Owner,
             IncomingShipmentId = dto.IncomingShipmentId,
+            IsTestProduct = dto.IsTestProduct,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -289,6 +298,7 @@ public class ProductKitService : IProductKitService
             CartAvailableAt = dto.CartAvailableAt,
             BoxNumber = dto.BoxNumber,
             IncomingShipmentId = dto.IncomingShipmentId,
+            IsTestProduct = dto.IsTestProduct,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         };
@@ -349,6 +359,7 @@ public class ProductKitService : IProductKitService
         if (dto.BoxNumber != null)
             product.BoxNumber = dto.BoxNumber;
         product.IncomingShipmentId = dto.IncomingShipmentId;
+        product.IsTestProduct = dto.IsTestProduct;
         product.UpdatedAt = DateTime.UtcNow;
     }
 
@@ -383,6 +394,7 @@ public class ProductKitService : IProductKitService
             IsKit = true,
             KitId = kit.Id,
             KitPrice = kit.KitPrice,
+            IsTestProduct = display.IsTestProduct,
         };
 
         var parts = await _context.Products.AsNoTracking()
@@ -398,6 +410,22 @@ public class ProductKitService : IProductKitService
             .ToListAsync();
         dto.KitParts = parts;
         return dto;
+    }
+
+    private async Task SyncKitTestFlagAsync(int kitId, bool isTestProduct)
+    {
+        var kitProducts = await _context.Products.Where(p => p.KitId == kitId).ToListAsync();
+        foreach (var p in kitProducts)
+            p.IsTestProduct = isTestProduct;
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task<bool> IsAdminUserAsync(int? currentUserId)
+    {
+        if (!currentUserId.HasValue)
+            return false;
+        return await _context.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == currentUserId.Value && u.IsAdmin);
     }
 
     private async Task<HashSet<int>> GetReservedByOthersAsync(List<int> productIds, string? sessionId, int? currentUserId)

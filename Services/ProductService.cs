@@ -38,10 +38,12 @@ public class ProductService : IProductService
     /// <returns>List of all products</returns>
     public async Task<List<ProductDto>> GetAllProductsAsync(string? sessionId = null, int? currentUserId = null)
     {
+        var isAdmin = await IsAdminUserAsync(currentUserId);
         var moscowNow = DateTimeHelper.GetMoscowTime();
         var products = await _context.Products
             .Where(p => (p.PublishedAt == null || p.PublishedAt <= moscowNow)
-                && (!p.KitId.HasValue || p.IsKitDisplay))
+                && (!p.KitId.HasValue || p.IsKitDisplay)
+                && (!p.IsTestProduct || isAdmin))
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 
@@ -101,11 +103,13 @@ public class ProductService : IProductService
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 48);
 
+        var isAdmin = await IsAdminUserAsync(currentUserId);
         var moscowNow = DateTimeHelper.GetMoscowTime();
         var allVisible = await _context.Products
             .Where(p => p.QuantityInStock > 0
                 && (p.PublishedAt == null || p.PublishedAt <= moscowNow)
-                && (!p.KitId.HasValue || p.IsKitDisplay))
+                && (!p.KitId.HasValue || p.IsKitDisplay)
+                && (!p.IsTestProduct || isAdmin))
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 
@@ -304,11 +308,13 @@ public class ProductService : IProductService
     /// <returns>Product information or null if not found</returns>
     public async Task<ProductDto?> GetProductByIdAsync(int id, string? sessionId = null, int? currentUserId = null)
     {
+        var isAdmin = await IsAdminUserAsync(currentUserId);
         var moscowNow = DateTimeHelper.GetMoscowTime();
         var product = await _context.Products
             .Where(p => p.Id == id
                 && (p.PublishedAt == null || p.PublishedAt <= moscowNow)
-                && (!p.KitId.HasValue || p.IsKitDisplay))
+                && (!p.KitId.HasValue || p.IsKitDisplay)
+                && (!p.IsTestProduct || isAdmin))
             .FirstOrDefaultAsync();
         if (product == null) return null;
 
@@ -368,6 +374,7 @@ public class ProductService : IProductService
             BoxNumber = dto.BoxNumber,
             Owner = normalizedOwner,
             IncomingShipmentId = dto.IncomingShipmentId,
+            IsTestProduct = dto.IsTestProduct,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -465,6 +472,7 @@ public class ProductService : IProductService
         if (dto.Owner != null)
             product.Owner = normalizedOwner;
         product.IncomingShipmentId = dto.IncomingShipmentId;
+        product.IsTestProduct = dto.IsTestProduct;
         product.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -586,7 +594,16 @@ public class ProductService : IProductService
             UpdatedAt = product.UpdatedAt,
             KitId = product.KitId,
             IsKit = product.KitId.HasValue,
+            IsTestProduct = product.IsTestProduct,
         };
+    }
+
+    private async Task<bool> IsAdminUserAsync(int? currentUserId)
+    {
+        if (!currentUserId.HasValue)
+            return false;
+        return await _context.Users.AsNoTracking()
+            .AnyAsync(u => u.Id == currentUserId.Value && u.IsAdmin);
     }
 
     private static string? NormalizeOwnerOrThrow(string? owner)
@@ -615,7 +632,8 @@ public class ProductService : IProductService
         var products = await _context.Products
             .Where(p => p.PublishedAt != null && 
                        p.PublishedAt <= moscowNow && 
-                       p.PublishedAt > fiveMinutesAgo)
+                       p.PublishedAt > fiveMinutesAgo &&
+                       !p.IsTestProduct)
             .OrderBy(p => p.PublishedAt)
             .ToListAsync();
         

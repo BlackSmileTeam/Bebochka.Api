@@ -163,4 +163,7 @@ public class Product
 
     /// <summary>Карточка в каталоге (основная позиция комплекта).</summary>
     public bool IsKitDisplay { get; set; }
+
+    /// <summary>Тестовый товар — только для администраторов.</summary>
+    public bool IsTestProduct { get; set; }
 }
