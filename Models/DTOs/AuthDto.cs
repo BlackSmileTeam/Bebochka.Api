@@ -191,6 +191,11 @@ public class UserDto
     /// Количество детей, добавленных в профиле пользователя.
     /// </summary>
     public int ChildrenCount { get; set; }
+
+    /// <summary>
+    /// Дети пользователя (заполняется в GET /api/users/{id} для админки).
+    /// </summary>
+    public List<UserChildDto>? Children { get; set; }
 }
 
 /// <summary>

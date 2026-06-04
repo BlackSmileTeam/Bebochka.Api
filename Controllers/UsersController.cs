@@ -140,7 +140,39 @@ public class UsersController : ControllerBase
         if (user == null)
             return NotFound();
 
-        return Ok(MapToUserDto(user));
+        var dto = MapToUserDto(user);
+        dto.Children = await LoadUserChildrenAsync(id);
+        return Ok(dto);
+    }
+
+    /// <summary>
+    /// Gets children profiles for a user (admin).
+    /// </summary>
+    [HttpGet("{id:int}/children")]
+    [ProducesResponseType(typeof(List<UserChildDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<List<UserChildDto>>> GetUserChildren(int id)
+    {
+        if (!await _context.Users.AnyAsync(u => u.Id == id))
+            return NotFound();
+
+        var list = await _context.UserChildren
+            .AsNoTracking()
+            .Where(c => c.UserId == id)
+            .OrderBy(c => c.Name)
+            .ToListAsync();
+
+        return Ok(await LoadUserChildrenAsync(id));
+    }
+
+    private async Task<List<UserChildDto>> LoadUserChildrenAsync(int userId)
+    {
+        var list = await _context.UserChildren
+            .AsNoTracking()
+            .Where(c => c.UserId == userId)
+            .OrderBy(c => c.Name)
+            .ToListAsync();
+        return list.Select(MapChild).ToList();
     }
 
     private static UserDto MapToUserDto(User user) => new()
@@ -162,6 +194,17 @@ public class UsersController : ControllerBase
         if (vkUserId is not > 0) return null;
         return $"https://vk.com/id{vkUserId.Value}";
     }
+
+    private static UserChildDto MapChild(UserChild c) => new()
+    {
+        Id = c.Id,
+        Name = c.Name,
+        DateOfBirth = c.DateOfBirth,
+        ClothingSize = c.ClothingSize,
+        Gender = c.Gender,
+        CreatedAt = c.CreatedAt,
+        UpdatedAt = c.UpdatedAt
+    };
 
     /// <summary>
     /// Links a Telegram User ID to an existing user
