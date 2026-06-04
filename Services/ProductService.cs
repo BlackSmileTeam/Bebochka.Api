@@ -70,6 +70,226 @@ public class ProductService : IProductService
         }).ToList();
     }
 
+    private static readonly Dictionary<string, int> ConditionPriority = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["состояние новой вещи"] = 0,
+        ["новая вещь"] = 0,
+        ["новая"] = 0,
+        ["очень хорошее"] = 1,
+        ["отличное"] = 2,
+        ["хорошее"] = 3,
+        ["нюанс"] = 4,
+        ["недостаток"] = 4,
+    };
+
+    public async Task<CatalogProductsPageDto> GetCatalogPageAsync(
+        int page,
+        int pageSize,
+        string? sessionId,
+        int? currentUserId,
+        string? brand,
+        string? sizesCsv,
+        string? color,
+        string? gender,
+        string? condition,
+        string? sort,
+        bool includeFacets)
+    {
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 48);
+
+        var moscowNow = DateTimeHelper.GetMoscowTime();
+        var allVisible = await _context.Products
+            .Where(p => p.QuantityInStock > 0 && (p.PublishedAt == null || p.PublishedAt <= moscowNow))
+            .OrderByDescending(p => p.CreatedAt)
+            .ToListAsync();
+
+        var filterSizes = ParseFilterSizes(sizesCsv);
+        var filterGender = NormalizeGenderFilter(gender);
+
+        IEnumerable<Product> filtered = allVisible.Where(p => MatchesCatalogFilters(p, brand, filterSizes, color, filterGender, condition));
+        filtered = ApplyCatalogSort(filtered, sort);
+
+        var filteredList = filtered.ToList();
+        var total = filteredList.Count;
+        var pageItems = filteredList
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToList();
+
+        var productIds = pageItems.Select(p => p.Id).ToList();
+        var reservedQuantities = await GetReservedQuantitiesAsync(productIds, sessionId, currentUserId);
+        var shipmentNames = await GetShipmentNamesAsync(pageItems);
+
+        var items = pageItems.Select(p =>
+        {
+            var dto = MapToDto(p);
+            var reserved = reservedQuantities.GetValueOrDefault(p.Id, 0);
+            dto.AvailableQuantity = Math.Max(0, p.QuantityInStock - reserved);
+            if (p.IncomingShipmentId.HasValue)
+                dto.IncomingShipmentName = shipmentNames.GetValueOrDefault(p.IncomingShipmentId.Value);
+            return dto;
+        }).ToList();
+
+        return new CatalogProductsPageDto
+        {
+            Items = items,
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+            HasMore = page * pageSize < total,
+            Facets = includeFacets ? BuildCatalogFacets(allVisible) : null,
+        };
+    }
+
+    private async Task<Dictionary<int, int>> GetReservedQuantitiesAsync(
+        List<int> productIds,
+        string? sessionId,
+        int? currentUserId)
+    {
+        if (productIds.Count == 0)
+            return new Dictionary<int, int>();
+
+        var cartQuery = _context.CartItems.Where(c => productIds.Contains(c.ProductId));
+        cartQuery = ApplyOtherUsersCartFilter(cartQuery, sessionId, currentUserId);
+        var reservedItems = await cartQuery
+            .GroupBy(c => c.ProductId)
+            .Select(g => new { ProductId = g.Key, Reserved = g.Sum(c => c.Quantity) })
+            .ToListAsync();
+        return reservedItems.ToDictionary(x => x.ProductId, x => x.Reserved);
+    }
+
+    private async Task<Dictionary<int, string?>> GetShipmentNamesAsync(List<Product> products)
+    {
+        var shipmentIds = products
+            .Where(p => p.IncomingShipmentId.HasValue)
+            .Select(p => p.IncomingShipmentId!.Value)
+            .Distinct()
+            .ToList();
+        if (shipmentIds.Count == 0)
+            return new Dictionary<int, string?>();
+
+        return await _context.IncomingShipments
+            .Where(s => shipmentIds.Contains(s.Id))
+            .ToDictionaryAsync(s => s.Id, s => s.Name);
+    }
+
+    private static List<string> ParseFilterSizes(string? sizesCsv)
+    {
+        if (string.IsNullOrWhiteSpace(sizesCsv))
+            return new List<string>();
+        return sizesCsv
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => s.Length > 0)
+            .ToList();
+    }
+
+    private static string? NormalizeGenderFilter(string? gender)
+    {
+        var g = (gender ?? "").Trim().ToLowerInvariant();
+        return g.Length > 0 ? g : null;
+    }
+
+    private static bool MatchesCatalogFilters(
+        Product product,
+        string? brand,
+        List<string> filterSizes,
+        string? color,
+        string? filterGender,
+        string? condition)
+    {
+        if (!string.IsNullOrWhiteSpace(brand) && !string.Equals(product.Brand, brand, StringComparison.Ordinal))
+            return false;
+        if (!string.IsNullOrWhiteSpace(color) && !string.Equals(product.Color, color, StringComparison.Ordinal))
+            return false;
+        if (filterGender != null)
+        {
+            var pg = (product.Gender ?? "").Trim().ToLowerInvariant();
+            if (pg != filterGender)
+                return false;
+        }
+        if (!string.IsNullOrWhiteSpace(condition) && !string.Equals(product.Condition, condition, StringComparison.Ordinal))
+            return false;
+        if (filterSizes.Count > 0 && !ProductMatchesSizeFilter(product.Size, filterSizes))
+            return false;
+        return true;
+    }
+
+    private static bool ProductMatchesSizeFilter(string? productSize, List<string> filterSizes)
+    {
+        if (filterSizes.Count == 0)
+            return true;
+
+        var productSizes = ParseProductSizes(productSize);
+        if (productSizes.Count == 0)
+        {
+            var raw = (productSize ?? "").Trim();
+            return raw.Length > 0 && filterSizes.Contains(raw);
+        }
+
+        return productSizes.Any(s => filterSizes.Contains(s));
+    }
+
+    private static List<string> ParseProductSizes(string? productSize)
+    {
+        if (string.IsNullOrWhiteSpace(productSize))
+            return new List<string>();
+        return productSize
+            .Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => s.Length > 0)
+            .ToList();
+    }
+
+    private static IEnumerable<Product> ApplyCatalogSort(IEnumerable<Product> products, string? sort)
+    {
+        var key = (sort ?? "").Trim().ToLowerInvariant();
+        if (key == "price_asc")
+        {
+            return products
+                .OrderBy(GetEffectivePrice)
+                .ThenBy(p => p.Name ?? "", StringComparer.Ordinal);
+        }
+        if (key == "price_desc")
+        {
+            return products
+                .OrderByDescending(GetEffectivePrice)
+                .ThenBy(p => p.Name ?? "", StringComparer.Ordinal);
+        }
+        return products.OrderByDescending(p => p.CreatedAt);
+    }
+
+    private static decimal GetEffectivePrice(Product p) =>
+        ComputeFinalPrice(p.Price, p.DiscountPercent) ?? p.Price;
+
+    private static CatalogFacetDto BuildCatalogFacets(List<Product> visible)
+    {
+        var brands = visible.Select(p => p.Brand).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().OrderBy(s => s, StringComparer.Ordinal).Cast<string>().ToList();
+        var sizes = visible.Select(p => p.Size).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().OrderBy(s => s, StringComparer.Ordinal).Cast<string>().ToList();
+        var colors = visible.Select(p => p.Color).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().OrderBy(s => s, StringComparer.Ordinal).Cast<string>().ToList();
+        var genders = visible.Select(p => p.Gender).Where(s => !string.IsNullOrWhiteSpace(s)).Distinct().OrderBy(s => s, StringComparer.Ordinal).Cast<string>().ToList();
+        var conditions = visible
+            .Select(p => p.Condition)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Distinct()
+            .OrderBy(s =>
+            {
+                var key = s!.Trim().ToLowerInvariant();
+                return ConditionPriority.GetValueOrDefault(key, 999);
+            })
+            .ThenBy(s => s, StringComparer.Ordinal)
+            .Cast<string>()
+            .ToList();
+
+        return new CatalogFacetDto
+        {
+            Brands = brands,
+            Sizes = sizes,
+            Colors = colors,
+            Genders = genders,
+            Conditions = conditions,
+        };
+    }
+
     /// <summary>
     /// Gets a product by its unique identifier
     /// PublishedAt is stored as Moscow time, so we compare with current Moscow time

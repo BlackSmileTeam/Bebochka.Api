@@ -15,6 +15,22 @@ public interface IProductService
     Task<List<ProductDto>> GetAllProductsAsync(string? sessionId = null, int? currentUserId = null);
 
     /// <summary>
+    /// Paginated catalog for the shop (in-stock, published products).
+    /// </summary>
+    Task<CatalogProductsPageDto> GetCatalogPageAsync(
+        int page,
+        int pageSize,
+        string? sessionId,
+        int? currentUserId,
+        string? brand,
+        string? sizesCsv,
+        string? color,
+        string? gender,
+        string? condition,
+        string? sort,
+        bool includeFacets);
+
+    /// <summary>
     /// Gets a product by its unique identifier
     /// </summary>
     /// <param name="id">Product identifier</param>

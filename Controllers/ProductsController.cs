@@ -100,6 +100,39 @@ public class ProductsController : ControllerBase
     }
 
     /// <summary>
+    /// Paginated catalog (filters, sort, facets for filter dropdowns).
+    /// </summary>
+    [HttpGet("catalog")]
+    [ProducesResponseType(typeof(CatalogProductsPageDto), StatusCodes.Status200OK)]
+    public async Task<ActionResult<CatalogProductsPageDto>> GetCatalog(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 24,
+        [FromQuery] string? sessionId = null,
+        [FromQuery] string? brand = null,
+        [FromQuery] string? size = null,
+        [FromQuery] string? color = null,
+        [FromQuery] string? gender = null,
+        [FromQuery] string? condition = null,
+        [FromQuery] string? sort = null,
+        [FromQuery] bool includeFacets = true)
+    {
+        var uid = await TryGetUserIdFromBearerAsync();
+        var result = await _productService.GetCatalogPageAsync(
+            page,
+            pageSize,
+            sessionId,
+            uid,
+            brand,
+            size,
+            color,
+            gender,
+            condition,
+            sort,
+            includeFacets);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Gets a product by its unique identifier
     /// </summary>
     /// <param name="id">Product identifier</param>
