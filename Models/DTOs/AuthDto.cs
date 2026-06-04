@@ -186,6 +186,11 @@ public class UserDto
     /// Ссылка на профиль VK (https://vk.com/id…).
     /// </summary>
     public string? VkProfileUrl { get; set; }
+
+    /// <summary>
+    /// Количество детей, добавленных в профиле пользователя.
+    /// </summary>
+    public int ChildrenCount { get; set; }
 }
 
 /// <summary>

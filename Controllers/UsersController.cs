@@ -83,7 +83,17 @@ public class UsersController : ControllerBase
             .OrderBy(u => u.Username)
             .ToListAsync();
 
-        return Ok(users.Select(MapToUserDto).ToList());
+        var childCounts = await _context.UserChildren
+            .GroupBy(c => c.UserId)
+            .Select(g => new { UserId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.UserId, x => x.Count);
+
+        return Ok(users.Select(u =>
+        {
+            var dto = MapToUserDto(u);
+            dto.ChildrenCount = childCounts.GetValueOrDefault(u.Id, 0);
+            return dto;
+        }).ToList());
     }
 
     /// <summary>
