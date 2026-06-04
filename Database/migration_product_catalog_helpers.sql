@@ -46,6 +46,6 @@ INSERT IGNORE INTO productcolors (Name) VALUES
   ('Многоцветный'), ('Другой');
 
 INSERT IGNORE INTO productconditions (Name) VALUES
-  ('новая вещь'), ('состояние новой вещи'), ('очень хорошее'), ('отличное'), ('хорошее'), ('нюанс');
+  ('новая вещь'), ('состояние новой вещи'), ('очень хорошее'), ('отличное'), ('хорошее'), ('нормальное'), ('нюанс');
 
 SELECT 'product catalog helpers migration done.' AS Info;
