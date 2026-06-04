@@ -103,5 +103,7 @@ public class CartItemDto
     public string? KitBundleKey { get; set; }
     public string? KitPartName { get; set; }
     public bool IsKitDisplayLine { get; set; }
+    /// <summary>ID карточки комплекта в каталоге (для частей — ссылка на display-товар).</summary>
+    public int? KitDisplayProductId { get; set; }
 }
 

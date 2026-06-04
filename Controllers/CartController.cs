@@ -70,6 +70,71 @@ public class CartController : ControllerBase
         return query.Where(c => c.SessionId == sessionId && c.UserId == null);
     }
 
+    private async Task<List<CartItem>> LoadOwnCartItemsAsync(int? userId, string? sessionId)
+    {
+        var query = _context.CartItems.Include(c => c.Product).AsQueryable();
+        if (userId.HasValue)
+            query = query.Where(c => c.UserId == userId.Value);
+        else
+            query = query.Where(c => c.SessionId == sessionId && c.UserId == null);
+        return await query.ToListAsync();
+    }
+
+    private async Task PromoteCompleteKitPartsInCartAsync(List<CartItem> cartItems, int? userId, string? sessionId)
+    {
+        var kitIds = cartItems
+            .Where(c => c.KitId.HasValue && c.CartAddMode == ProductKitService.CartAddModePart)
+            .Select(c => c.KitId!.Value)
+            .Distinct()
+            .ToList();
+
+        foreach (var kitId in kitIds)
+            await _kitService.TryPromoteKitPartsToBundleAsync(kitId, sessionId, userId);
+    }
+
+    private async Task<CartItemDto> MapCartItemToDtoAsync(CartItem c)
+    {
+        Product? display = null;
+        ProductKit? kit = null;
+        if (c.KitId.HasValue)
+        {
+            display = await _context.Products.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.KitId == c.KitId && p.IsKitDisplay);
+            kit = await _context.ProductKits.AsNoTracking().FirstOrDefaultAsync(k => k.Id == c.KitId);
+        }
+
+        var isPartLine = c.CartAddMode == ProductKitService.CartAddModePart
+            && c.Product != null
+            && !c.Product.IsKitDisplay;
+        var images = c.Product?.Images ?? new List<string>();
+        if (isPartLine && display?.Images?.Count > 0)
+            images = display.Images;
+
+        var price = c.ChargedUnitPrice ?? c.Product?.Price ?? 0m;
+        if (c.Product?.IsKitDisplay == true && c.CartAddMode == ProductKitService.CartAddModeBundle && kit != null)
+            price = c.ChargedUnitPrice ?? kit.KitPrice;
+
+        return new CartItemDto
+        {
+            Id = c.Id,
+            ProductId = c.ProductId,
+            ProductName = c.Product!.Name,
+            ProductPrice = price,
+            ProductBrand = c.Product.Brand,
+            ProductSize = c.Product.Size,
+            ProductColor = c.Product.Color,
+            ProductImages = images,
+            Quantity = c.Quantity,
+            CreatedAt = c.CreatedAt,
+            KitId = c.KitId,
+            CartAddMode = c.CartAddMode,
+            KitBundleKey = c.KitBundleKey,
+            KitPartName = c.Product.KitPartName,
+            IsKitDisplayLine = c.Product.IsKitDisplay,
+            KitDisplayProductId = display?.Id,
+        };
+    }
+
     public class AdminCartItemDto
     {
         public int Id { get; set; }
@@ -112,34 +177,17 @@ public class CartController : ControllerBase
             return BadRequest(new { message = "SessionId is required for guests" });
 
         var isAdmin = await IsAdminUserAsync(userId);
-        var query = _context.CartItems.Include(c => c.Product).AsQueryable();
-        if (userId.HasValue)
-            query = query.Where(c => c.UserId == userId.Value);
-        else
-            query = query.Where(c => c.SessionId == sessionId && c.UserId == null);
+        var cartItems = await LoadOwnCartItemsAsync(userId, sessionId);
+        await PromoteCompleteKitPartsInCartAsync(cartItems, userId, sessionId);
+        cartItems = await LoadOwnCartItemsAsync(userId, sessionId);
 
-        var cartItems = await query.ToListAsync();
         if (!isAdmin)
             cartItems = cartItems.Where(c => c.Product == null || !c.Product.IsTestProduct).ToList();
         cartItems = cartItems.Where(c => !IsKitBundlePartLine(c)).ToList();
-        var dtos = cartItems.Select(c => new CartItemDto
-        {
-            Id = c.Id,
-            ProductId = c.ProductId,
-            ProductName = c.Product!.Name,
-            ProductPrice = c.ChargedUnitPrice ?? c.Product.Price,
-            ProductBrand = c.Product.Brand,
-            ProductSize = c.Product.Size,
-            ProductColor = c.Product.Color,
-            ProductImages = c.Product.Images ?? new List<string>(),
-            Quantity = c.Quantity,
-            CreatedAt = c.CreatedAt,
-            KitId = c.KitId,
-            CartAddMode = c.CartAddMode,
-            KitBundleKey = c.KitBundleKey,
-            KitPartName = c.Product.KitPartName,
-            IsKitDisplayLine = c.Product.IsKitDisplay,
-        }).ToList();
+
+        var dtos = new List<CartItemDto>();
+        foreach (var c in cartItems)
+            dtos.Add(await MapCartItemToDtoAsync(c));
 
         return Ok(dtos);
     }
@@ -312,26 +360,18 @@ public class CartController : ControllerBase
         if (savedCartItem == null)
             return BadRequest(new { message = "Не удалось добавить товар в корзину" });
 
+        if (savedCartItem.KitId.HasValue
+            && savedCartItem.CartAddMode == ProductKitService.CartAddModePart)
+        {
+            var promoted = await _kitService.TryPromoteKitPartsToBundleAsync(
+                savedCartItem.KitId.Value, dto.SessionId, userId);
+            if (promoted != null)
+                savedCartItem = promoted;
+        }
+
         await _context.Entry(savedCartItem).Reference(c => c.Product).LoadAsync();
 
-        var cartItemDto = new CartItemDto
-        {
-            Id = savedCartItem.Id,
-            ProductId = savedCartItem.ProductId,
-            ProductName = savedCartItem.Product!.Name,
-            ProductPrice = savedCartItem.ChargedUnitPrice ?? savedCartItem.Product.Price,
-            ProductBrand = savedCartItem.Product.Brand,
-            ProductSize = savedCartItem.Product.Size,
-            ProductColor = savedCartItem.Product.Color,
-            ProductImages = savedCartItem.Product.Images ?? new List<string>(),
-            Quantity = savedCartItem.Quantity,
-            CreatedAt = savedCartItem.CreatedAt,
-            KitId = savedCartItem.KitId,
-            CartAddMode = savedCartItem.CartAddMode,
-            KitBundleKey = savedCartItem.KitBundleKey,
-            KitPartName = savedCartItem.Product.KitPartName,
-            IsKitDisplayLine = savedCartItem.Product.IsKitDisplay,
-        };
+        var cartItemDto = await MapCartItemToDtoAsync(savedCartItem);
 
         return CreatedAtAction(nameof(GetCartItems), new { sessionId = dto.SessionId }, cartItemDto);
     }

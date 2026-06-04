@@ -208,7 +208,9 @@ public class ProductKitService : IProductKitService
             .ToList();
 
         var hasReservation = partDtos.Any(p => p.IsReservedByOthers);
-        var hasOwnFullKit = allKitIds.Count > 0 && allKitIds.All(id => myKitCart.GetValueOrDefault(id) > 0);
+        var hasAllPartsInCart = allIds.Count > 0 && allIds.All(id => myCart.GetValueOrDefault(id) > 0);
+        var hasOwnFullKit = (allKitIds.Count > 0 && allKitIds.All(id => myKitCart.GetValueOrDefault(id) > 0))
+            || hasAllPartsInCart;
         var canAddFull = partDtos.Count > 0 && partDtos.All(p => !p.IsReservedByOthers) && !hasOwnFullKit;
 
         return new ProductKitOptionsDto
@@ -410,6 +412,79 @@ public class ProductKitService : IProductKitService
             .ToListAsync();
         dto.KitParts = parts;
         return dto;
+    }
+
+    public async Task<CartItem?> TryPromoteKitPartsToBundleAsync(int kitId, string? sessionId, int? userId)
+    {
+        var kitProducts = await _context.Products
+            .Where(p => p.KitId == kitId)
+            .OrderBy(p => p.IsKitDisplay ? 0 : 1)
+            .ThenBy(p => p.KitPartSortOrder)
+            .ToListAsync();
+
+        var display = kitProducts.FirstOrDefault(p => p.IsKitDisplay);
+        var requiredPartIds = kitProducts.Where(p => !p.IsKitDisplay).Select(p => p.Id).ToHashSet();
+        if (display == null || requiredPartIds.Count == 0)
+            return null;
+
+        var ownQuery = _context.CartItems
+            .Include(c => c.Product)
+            .Where(c => c.KitId == kitId);
+        if (userId.HasValue)
+            ownQuery = ownQuery.Where(c => c.UserId == userId);
+        else if (!string.IsNullOrEmpty(sessionId))
+            ownQuery = ownQuery.Where(c => c.UserId == null && c.SessionId == sessionId);
+        else
+            return null;
+
+        var ownLines = await ownQuery.ToListAsync();
+        var existingBundleDisplay = ownLines.FirstOrDefault(c =>
+            c.ProductId == display.Id && c.CartAddMode == CartAddModeBundle);
+        if (existingBundleDisplay != null)
+            return existingBundleDisplay;
+
+        var ownedPartIds = ownLines
+            .Where(c => c.CartAddMode == CartAddModePart && c.Product != null && !c.Product.IsKitDisplay)
+            .Select(c => c.ProductId)
+            .ToHashSet();
+        if (!requiredPartIds.All(id => ownedPartIds.Contains(id)))
+            return null;
+
+        var kit = await _context.ProductKits.FindAsync(kitId);
+        if (kit == null)
+            return null;
+
+        var sessionKey = userId.HasValue ? $"uid:{userId.Value}" : sessionId!;
+        var bundleKey = Guid.NewGuid().ToString("N");
+        var now = DateTime.UtcNow;
+
+        _context.CartItems.RemoveRange(ownLines.Where(c => c.CartAddMode == CartAddModePart));
+
+        CartItem? displayLine = null;
+        foreach (var kp in kitProducts)
+        {
+            var line = new CartItem
+            {
+                SessionId = sessionKey,
+                UserId = userId,
+                ProductId = kp.Id,
+                Quantity = 1,
+                KitId = kitId,
+                CartAddMode = CartAddModeBundle,
+                KitBundleKey = bundleKey,
+                ChargedUnitPrice = kp.IsKitDisplay ? kit.KitPrice : 0m,
+                CreatedAt = now,
+                UpdatedAt = now,
+            };
+            _context.CartItems.Add(line);
+            if (kp.IsKitDisplay)
+                displayLine = line;
+        }
+
+        await _context.SaveChangesAsync();
+        if (displayLine != null)
+            await _context.Entry(displayLine).Reference(c => c.Product).LoadAsync();
+        return displayLine;
     }
 
     private async Task SyncKitTestFlagAsync(int kitId, bool isTestProduct)
