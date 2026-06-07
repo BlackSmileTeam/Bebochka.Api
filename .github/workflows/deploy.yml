@@ -243,9 +243,11 @@ jobs:
             docker ps -a | grep ${{ env.IMAGE_NAME }} || true
             docker logs --tail 40 ${{ env.IMAGE_NAME }} || true
             sleep 3
-            CODE=$(curl -sS -o /tmp/api_body.txt -w "%{http_code}" --max-time 45 -X GET "http://127.0.0.1:${{ env.HOST_PORT }}/api/products" || echo "000")
-            echo "GET /api/products HTTP $CODE"
+            CODE=$(curl -sS -o /tmp/api_body.txt -w "%{http_code}" --max-time 45 -X GET "http://127.0.0.1:${{ env.HOST_PORT }}/api/health" || echo "000")
+            echo "GET /api/health HTTP $CODE"
             if [ "$CODE" = "200" ]; then head -c 200 /tmp/api_body.txt && echo " ... (truncated)"; else echo "WARN: ожидался 200 — проверьте БД и DB_CONNECTION_STRING"; fi
+            CODE2=$(curl -sS -o /tmp/api_products.txt -w "%{http_code}" --max-time 45 -X GET "http://127.0.0.1:${{ env.HOST_PORT }}/api/products?page=1&pageSize=1" || echo "000")
+            echo "GET /api/products HTTP $CODE2"
             echo "=== Done ==="
 
       - name: Summary
