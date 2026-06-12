@@ -87,6 +87,10 @@ public class VkIdOAuthPending
     public string ReturnUrl { get; set; } = "/";
     public string? SessionId { get; set; }
     public bool AcceptPersonalDataProcessing { get; set; }
+    /// <summary>Origin фронта, с которого начали вход (bebochka.ru / bebochka.online и т.д.).</summary>
+    public string FrontendBaseUrl { get; set; } = "";
+    /// <summary>redirect_uri для VK — тот же домен, что и FrontendBaseUrl.</summary>
+    public string RedirectUri { get; set; } = "";
 }
 
 /// <summary>

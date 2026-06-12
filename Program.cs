@@ -233,10 +233,17 @@ builder.Services.AddAuthorization();
 
         builder.Services.AddHttpClient();
         
-        // Add background services
-        builder.Services.AddHostedService<ProductPublicationService>();
-        builder.Services.AddHostedService<AnnouncementService>();
-        builder.Services.AddHostedService<CartRetentionService>();
+        // Фоновые задачи (Telegram, корзины) — только на основном API (FirstVDS), не на edge-копии.
+        var runBackgroundJobs = !string.Equals(
+            builder.Configuration["App:RunBackgroundJobs"],
+            "false",
+            StringComparison.OrdinalIgnoreCase);
+        if (runBackgroundJobs)
+        {
+            builder.Services.AddHostedService<ProductPublicationService>();
+            builder.Services.AddHostedService<AnnouncementService>();
+            builder.Services.AddHostedService<CartRetentionService>();
+        }
 
 var app = builder.Build();
 

@@ -40,23 +40,55 @@ public class AuthController : ControllerBase
         return p.Length > 2000 ? "/" : p;
     }
 
-    private string ResolveFrontendBaseUrl()
+    private static string NormalizeHost(string? host)
     {
-        var configured = _configuration["App:FrontendPublicUrl"]?.Trim();
-        if (!string.IsNullOrWhiteSpace(configured))
-            return configured.TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(host)) return "";
+        var value = host.Split(',')[0].Trim();
+        var colon = value.IndexOf(':');
+        if (colon > 0 && value[..colon].Contains('.'))
+            value = value[..colon];
+        return value.Trim().ToLowerInvariant();
+    }
 
+    private bool IsAllowedFrontendHost(string host)
+    {
+        var normalized = NormalizeHost(host);
+        if (string.IsNullOrEmpty(normalized)) return false;
+
+        var configured = _configuration["App:AllowedFrontendHosts"];
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            return normalized is "bebochka.ru" or "www.bebochka.ru"
+                or "bebochka.online" or "www.bebochka.online"
+                or "xn--80abap0ax7d.xn--p1ai" or "www.xn--80abap0ax7d.xn--p1ai"
+                or "localhost" or "127.0.0.1";
+        }
+
+        return configured.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(h => string.Equals(NormalizeHost(h), normalized, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string ResolveRequestFrontendBaseUrl()
+    {
         var forwardedProto = Request.Headers["X-Forwarded-Proto"].FirstOrDefault();
         var scheme = !string.IsNullOrWhiteSpace(forwardedProto) ? forwardedProto : Request.Scheme;
         var host = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
         if (string.IsNullOrWhiteSpace(host))
             host = Request.Host.Value;
 
-        if (!string.IsNullOrWhiteSpace(host))
-            return $"{scheme}://{host}".TrimEnd('/');
+        var normalized = NormalizeHost(host);
+        if (!string.IsNullOrWhiteSpace(normalized) && IsAllowedFrontendHost(normalized))
+            return $"{scheme}://{normalized}".TrimEnd('/');
+
+        var configured = _configuration["App:FrontendPublicUrl"]?.Trim();
+        if (!string.IsNullOrWhiteSpace(configured))
+            return configured.TrimEnd('/');
 
         return "https://bebochka.ru";
     }
+
+    private static string BuildVkRedirectUri(string frontendBaseUrl) =>
+        $"{frontendBaseUrl.TrimEnd('/')}/api/auth/vk/callback";
 
     [HttpPost("login")]
     [ProducesResponseType(typeof(AuthResponseDto), StatusCodes.Status200OK)]
@@ -144,11 +176,11 @@ public class AuthController : ControllerBase
     public IActionResult VkStart([FromQuery] string? returnUrl, [FromQuery] string? sessionId, [FromQuery] bool acceptPersonalDataProcessing = false)
     {
         var appId = _configuration["Vk:AppId"]?.Trim();
-        var redirectUri = _configuration["Vk:RedirectUri"]?.Trim().TrimEnd('/');
-        var frontend = ResolveFrontendBaseUrl();
+        var frontend = ResolveRequestFrontendBaseUrl();
+        var redirectUri = BuildVkRedirectUri(frontend);
         var safeReturn = SafeReturnPath(returnUrl);
 
-        if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(redirectUri))
+        if (string.IsNullOrEmpty(appId))
             return Redirect($"{frontend.TrimEnd('/')}/account?returnUrl={Uri.EscapeDataString(safeReturn)}&vkError=config");
 
         if (!acceptPersonalDataProcessing)
@@ -163,7 +195,9 @@ public class AuthController : ControllerBase
             CodeVerifier = codeVerifier,
             ReturnUrl = safeReturn,
             SessionId = string.IsNullOrWhiteSpace(sessionId) ? null : sessionId.Trim(),
-            AcceptPersonalDataProcessing = acceptPersonalDataProcessing
+            AcceptPersonalDataProcessing = acceptPersonalDataProcessing,
+            FrontendBaseUrl = frontend,
+            RedirectUri = redirectUri
         };
 
         _memoryCache.Set(VkIdOAuthCachePrefix + oauthState, pending, new MemoryCacheEntryOptions
@@ -191,18 +225,29 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> VkCallback([FromQuery] string? code, [FromQuery] string? state, [FromQuery] string? device_id, [FromQuery] string? error, CancellationToken cancellationToken)
     {
-        var frontend = ResolveFrontendBaseUrl();
-
         if (!string.IsNullOrEmpty(error))
-            return Redirect($"{frontend.TrimEnd('/')}/account?vkError=denied");
+        {
+            var frontendOnError = ResolveRequestFrontendBaseUrl();
+            return Redirect($"{frontendOnError.TrimEnd('/')}/account?vkError=denied");
+        }
 
         if (string.IsNullOrEmpty(state) || string.IsNullOrEmpty(code))
-            return Redirect($"{frontend.TrimEnd('/')}/account?vkError=incomplete");
+        {
+            var frontendOnError = ResolveRequestFrontendBaseUrl();
+            return Redirect($"{frontendOnError.TrimEnd('/')}/account?vkError=incomplete");
+        }
 
         if (!_memoryCache.TryGetValue(VkIdOAuthCachePrefix + state, out VkIdOAuthPending? pending) || pending == null)
-            return Redirect($"{frontend.TrimEnd('/')}/account?vkError=state");
+        {
+            var frontendOnError = ResolveRequestFrontendBaseUrl();
+            return Redirect($"{frontendOnError.TrimEnd('/')}/account?vkError=state");
+        }
 
         _memoryCache.Remove(VkIdOAuthCachePrefix + state);
+
+        var frontend = !string.IsNullOrWhiteSpace(pending.FrontendBaseUrl)
+            ? pending.FrontendBaseUrl.TrimEnd('/')
+            : ResolveRequestFrontendBaseUrl();
 
         if (string.IsNullOrWhiteSpace(device_id))
             return Redirect($"{frontend.TrimEnd('/')}/account?vkError=incomplete");

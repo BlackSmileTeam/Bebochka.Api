@@ -221,7 +221,9 @@ public class AuthService : IAuthService
         CancellationToken cancellationToken = default)
     {
         var appId = _configuration["Vk:AppId"]?.Trim();
-        var redirectUri = _configuration["Vk:RedirectUri"]?.Trim().TrimEnd('/');
+        var redirectUri = pending.RedirectUri?.Trim().TrimEnd('/');
+        if (string.IsNullOrEmpty(redirectUri))
+            redirectUri = _configuration["Vk:RedirectUri"]?.Trim().TrimEnd('/');
         if (string.IsNullOrEmpty(appId) || string.IsNullOrEmpty(redirectUri))
             return (null, "config");
 
