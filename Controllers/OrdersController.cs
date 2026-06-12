@@ -345,9 +345,9 @@ public class OrdersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> UpdateOrderStatus(int id, [FromBody] UpdateOrderStatusDto dto)
     {
-        var outcome = await _orderService.UpdateOrderStatusAsync(id, dto?.Status ?? string.Empty);
+        var outcome = await _orderService.UpdateOrderStatusAsync(id, dto?.Status ?? string.Empty, dto?.ConfirmSplit ?? false);
         if (!outcome.Success)
-            return BadRequest(new { message = outcome.Message ?? "Не удалось обновить статус заказа" });
+            return BadRequest(new { message = outcome.Message ?? "Не удалось обновить статус заказа", requiresSplitConfirmation = outcome.RequiresSplitConfirmation });
 
         return Ok(new { message = "Статус обновлен" });
     }
@@ -360,9 +360,9 @@ public class OrdersController : ControllerBase
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<ActionResult> UpdateOrderStatusPublic(int id, [FromBody] UpdateOrderStatusDto dto)
     {
-        var outcome = await _orderService.UpdateOrderStatusAsync(id, dto?.Status ?? string.Empty);
+        var outcome = await _orderService.UpdateOrderStatusAsync(id, dto?.Status ?? string.Empty, dto?.ConfirmSplit ?? false);
         if (!outcome.Success)
-            return BadRequest(new { message = outcome.Message ?? "Не удалось обновить статус заказа" });
+            return BadRequest(new { message = outcome.Message ?? "Не удалось обновить статус заказа", requiresSplitConfirmation = outcome.RequiresSplitConfirmation });
 
         return Ok(new { message = "Статус обновлен" });
     }
@@ -491,6 +491,9 @@ public class UpdateOrderStatusDto
 {
     [JsonPropertyName("status")]
     public string? Status { get; set; }
+
+    [JsonPropertyName("confirmSplit")]
+    public bool ConfirmSplit { get; set; }
 }
 
 public class SetOrderItemInParcelDto

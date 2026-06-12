@@ -18,6 +18,9 @@ public class OrderService : IOrderService
     /// <summary>Статус «Получен» выставляется только клиентом с сайта, не через админку.</summary>
     public const string StatusReceived = "Получен";
 
+    /// <summary>Автоматический статус родителя при частичной отправке (не выбирается вручную).</summary>
+    public const string StatusPartiallyShipped = "Отправлено частично";
+
     private static readonly string[] AdminSelectableStatuses =
     {
         "Формирование заказа", "Ожидает оплату", "Копим", "Оплачен", "В сборке", "На доставку", "Отправлен", "Отменен"
@@ -254,7 +257,23 @@ public class OrderService : IOrderService
             .Select(r => r.OrderId!.Value)
             .ToListAsync()).ToHashSet();
 
-        return orders.Select(o => MapToDto(o, user, reviewedOrderIds.Contains(o.Id))).ToList();
+        var rootOrders = orders.Where(o => o.ParentOrderId == null).OrderByDescending(o => o.CreatedAt).ToList();
+        var childrenByParent = orders
+            .Where(o => o.ParentOrderId.HasValue)
+            .GroupBy(o => o.ParentOrderId!.Value)
+            .ToDictionary(g => g.Key, g => g.OrderBy(o => o.OrderNumber).ToList());
+
+        return rootOrders.Select(o =>
+        {
+            var dto = MapToDto(o, user, reviewedOrderIds.Contains(o.Id));
+            if (childrenByParent.TryGetValue(o.Id, out var children))
+            {
+                dto.ChildOrders = children
+                    .Select(c => MapToDto(c, user, reviewedOrderIds.Contains(c.Id)))
+                    .ToList();
+            }
+            return dto;
+        }).ToList();
     }
 
     public async Task<bool> CancelOrderAsync(int orderId, string? reason = null)
@@ -315,7 +334,7 @@ public class OrderService : IOrderService
         return NormalizeIncomingOrderStatus(raw);
     }
 
-    public async Task<OrderStatusUpdateOutcome> UpdateOrderStatusAsync(int orderId, string statusRaw)
+    public async Task<OrderStatusUpdateOutcome> UpdateOrderStatusAsync(int orderId, string statusRaw, bool confirmSplit = false)
     {
         var status = NormalizeIncomingOrderStatus(statusRaw);
         if (string.IsNullOrWhiteSpace(status))
@@ -323,6 +342,9 @@ public class OrderService : IOrderService
 
         if (status == StatusReceived)
             return new OrderStatusUpdateOutcome(false, "Статус «Получен» может установить только клиент на сайте.");
+
+        if (status == StatusPartiallyShipped)
+            return new OrderStatusUpdateOutcome(false, "Статус «Отправлено частично» выставляется автоматически при частичной отправке.");
 
         if (!AdminSelectableStatuses.Contains(status))
             return new OrderStatusUpdateOutcome(false,
@@ -336,12 +358,31 @@ public class OrderService : IOrderService
 
         var previousStatus = order.Status?.Trim() ?? string.Empty;
 
-        // Конечные статусы: менять нельзя.
         if (string.Equals(previousStatus, StatusReceived, StringComparison.Ordinal))
             return new OrderStatusUpdateOutcome(false, "Заказ уже в статусе «Получен» — изменение статуса запрещено.");
 
         if (string.Equals(previousStatus, "Отменен", StringComparison.Ordinal))
             return new OrderStatusUpdateOutcome(false, "Заказ отменён — изменение статуса запрещено.");
+
+        if (string.Equals(previousStatus, StatusPartiallyShipped, StringComparison.Ordinal))
+            return new OrderStatusUpdateOutcome(false, "Статус родительского заказа меняется автоматически после отправки всех частей.");
+
+        if (status == "Отправлен"
+            && string.Equals(previousStatus, "В сборке", StringComparison.Ordinal)
+            && order.ParentOrderId == null
+            && !await _context.Orders.AnyAsync(o => o.ParentOrderId == orderId))
+        {
+            var inParcel = order.OrderItems.Where(i => i.AddedToParcel).ToList();
+            var notInParcel = order.OrderItems.Where(i => !i.AddedToParcel).ToList();
+            if (inParcel.Count > 0 && notInParcel.Count > 0)
+            {
+                if (!confirmSplit)
+                    return new OrderStatusUpdateOutcome(false,
+                        "Не все позиции отмечены «В посылке». Подтвердите разбиение заказа на две отправки.",
+                        RequiresSplitConfirmation: true);
+                return await SplitAndShipPartialOrderAsync(order, inParcel, notInParcel);
+            }
+        }
 
         order.Status = status;
         order.UpdatedAt = DateTime.UtcNow;
@@ -382,6 +423,9 @@ public class OrderService : IOrderService
         });
 
         await _context.SaveChangesAsync();
+
+        if (status == "Отправлен" && order.ParentOrderId.HasValue)
+            await TryPromoteParentWhenAllChildrenShippedAsync(order.ParentOrderId.Value);
 
         var user = order.UserId.HasValue ? await _context.Users.FindAsync(order.UserId.Value) : null;
         var telegramUserId = user?.TelegramUserId;
@@ -788,6 +832,14 @@ public class OrderService : IOrderService
             throw new InvalidOperationException("Заказ не найден");
         if (order.UserId != userId)
             throw new InvalidOperationException("Нет доступа к этому заказу");
+
+        var hasChildren = await _context.Orders.AnyAsync(o => o.ParentOrderId == orderId);
+        if (hasChildren)
+            throw new InvalidOperationException("Подтвердите получение по каждой отправке отдельно — кнопка «Получен» у каждой части.");
+
+        if (order.Status == StatusPartiallyShipped)
+            throw new InvalidOperationException("Заказ ещё не полностью отправлен — дождитесь всех частей.");
+
         if (order.Status != "Отправлен")
             throw new InvalidOperationException("Подтвердить получение можно только для отправленного заказа");
 
@@ -825,14 +877,18 @@ public class OrderService : IOrderService
 
         await _context.SaveChangesAsync();
 
-        try
+        if (order.ParentOrderId.HasValue)
+            await TryPromoteParentWhenAllChildrenReceivedAsync(order.ParentOrderId.Value, userId);
+        else
         {
-            await _referralService.ProcessOrderReceivedAsync(userId, orderId, GetFinalAmount(order));
-        }
-        catch (Exception ex)
-        {
-            // Non-critical: order already saved
-            Console.WriteLine($"[Referral] ProcessOrderReceived failed for order {orderId}: {ex.Message}");
+            try
+            {
+                await _referralService.ProcessOrderReceivedAsync(userId, orderId, GetFinalAmount(order));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Referral] ProcessOrderReceived failed for order {orderId}: {ex.Message}");
+            }
         }
 
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId);
@@ -1274,8 +1330,162 @@ public class OrderService : IOrderService
             TelegramUserId = user?.TelegramUserId,
             TelegramUsername = user != null ? (user.FullName ?? (user.Username != null && !user.Username.StartsWith("telegram_") ? user.Username : null)) ?? order.CustomerName : null,
             StatusHistory = history,
-            HasCustomerReview = hasCustomerReview
+            HasCustomerReview = hasCustomerReview,
+            ParentOrderId = order.ParentOrderId
         };
+    }
+
+    private static decimal SumItemsAmount(IEnumerable<OrderItem> items) =>
+        items.Sum(i => i.ProductPrice * i.Quantity);
+
+    private Order CreateSplitChildOrder(Order parent, decimal totalAmount, string orderNumberSuffix, string status)
+    {
+        return new Order
+        {
+            ParentOrderId = parent.Id,
+            OrderNumber = $"{parent.OrderNumber}-{orderNumberSuffix}",
+            UserId = parent.UserId,
+            CustomerName = parent.CustomerName,
+            CustomerProfileLink = parent.CustomerProfileLink,
+            CustomerPhone = parent.CustomerPhone,
+            CustomerEmail = parent.CustomerEmail,
+            CustomerAddress = parent.CustomerAddress,
+            DeliveryMethod = parent.DeliveryMethod,
+            Comment = parent.Comment,
+            TotalAmount = totalAmount,
+            Status = status,
+            DiscountType = parent.DiscountType,
+            FixedDiscountPercent = parent.FixedDiscountPercent,
+            Condition1ItemPercent = parent.Condition1ItemPercent,
+            Condition3ItemsPercent = parent.Condition3ItemsPercent,
+            Condition5PlusPercent = parent.Condition5PlusPercent,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        };
+    }
+
+    private void AddStatusHistory(int orderId, string status, int? changedByUserId = null)
+    {
+        _context.OrderStatusHistories.Add(new OrderStatusHistory
+        {
+            OrderId = orderId,
+            Status = status,
+            ChangedAtUtc = DateTime.UtcNow,
+            ChangedByUserId = changedByUserId ?? GetActorUserIdFromHttp()
+        });
+    }
+
+    private async Task<OrderStatusUpdateOutcome> SplitAndShipPartialOrderAsync(
+        Order parent,
+        List<OrderItem> inParcelItems,
+        List<OrderItem> notInParcelItems)
+    {
+        var actorId = GetActorUserIdFromHttp();
+        var shippedTotal = SumItemsAmount(inParcelItems);
+        var pendingTotal = SumItemsAmount(notInParcelItems);
+
+        var shippedChild = CreateSplitChildOrder(parent, shippedTotal, "1", "Отправлен");
+        var pendingChild = CreateSplitChildOrder(parent, pendingTotal, "2", "В сборке");
+
+        _context.Orders.Add(shippedChild);
+        _context.Orders.Add(pendingChild);
+        await _context.SaveChangesAsync();
+
+        foreach (var item in inParcelItems)
+        {
+            item.OrderId = shippedChild.Id;
+            item.AddedToParcel = false;
+        }
+        foreach (var item in notInParcelItems)
+        {
+            item.OrderId = pendingChild.Id;
+            item.AddedToParcel = false;
+        }
+
+        parent.Status = StatusPartiallyShipped;
+        parent.UpdatedAt = DateTime.UtcNow;
+
+        AddStatusHistory(parent.Id, StatusPartiallyShipped, actorId);
+        AddStatusHistory(shippedChild.Id, "Отправлен", actorId);
+        AddStatusHistory(pendingChild.Id, "В сборке", actorId);
+
+        var shippedProductIds = inParcelItems.Select(i => i.ProductId).Distinct().ToList();
+        await RemoveReserveQueueForProductsAsync(shippedProductIds);
+
+        await _context.SaveChangesAsync();
+
+        var user = parent.UserId.HasValue ? await _context.Users.FindAsync(parent.UserId.Value) : null;
+        var telegramUserId = user?.TelegramUserId;
+        if (telegramUserId.HasValue)
+        {
+            await _telegramService.SendMessageAsync(telegramUserId.Value,
+                $"<b>Заказ {parent.OrderNumber} отправлен частично</b>\n" +
+                $"Первая посылка ({shippedChild.OrderNumber}) уже в пути.\n" +
+                $"Оставшиеся позиции ({pendingChild.OrderNumber}) — в сборке, отправим позже.");
+        }
+
+        return new OrderStatusUpdateOutcome(true);
+    }
+
+    private async Task TryPromoteParentWhenAllChildrenShippedAsync(int parentOrderId)
+    {
+        var parent = await _context.Orders.FirstOrDefaultAsync(o => o.Id == parentOrderId);
+        if (parent == null || parent.Status != StatusPartiallyShipped)
+            return;
+
+        var children = await _context.Orders.Where(o => o.ParentOrderId == parentOrderId).ToListAsync();
+        if (children.Count == 0)
+            return;
+
+        var allShipped = children.All(c =>
+            c.Status == "Отправлен" || c.Status == StatusReceived);
+        if (!allShipped)
+            return;
+
+        parent.Status = "Отправлен";
+        parent.UpdatedAt = DateTime.UtcNow;
+        AddStatusHistory(parent.Id, "Отправлен", null);
+        await _context.SaveChangesAsync();
+
+        if (parent.UserId.HasValue)
+        {
+            var user = await _context.Users.FindAsync(parent.UserId.Value);
+            if (user?.TelegramUserId is long tgId)
+            {
+                await _telegramService.SendMessageAsync(tgId,
+                    $"<b>Заказ {parent.OrderNumber} полностью отправлен</b>\nВсе части заказа переданы в доставку.");
+            }
+        }
+    }
+
+    private async Task TryPromoteParentWhenAllChildrenReceivedAsync(int parentOrderId, int userId)
+    {
+        var parent = await _context.Orders
+            .Include(o => o.OrderItems)
+            .FirstOrDefaultAsync(o => o.Id == parentOrderId);
+        if (parent == null)
+            return;
+
+        var children = await _context.Orders.Where(o => o.ParentOrderId == parentOrderId).ToListAsync();
+        if (children.Count == 0)
+            return;
+
+        if (!children.All(c => c.Status == StatusReceived))
+            return;
+
+        parent.Status = StatusReceived;
+        parent.UpdatedAt = DateTime.UtcNow;
+        AddStatusHistory(parent.Id, StatusReceived, userId);
+        await _context.SaveChangesAsync();
+
+        try
+        {
+            await _referralService.ProcessOrderReceivedAsync(userId, parentOrderId, GetFinalAmount(parent));
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Referral] ProcessOrderReceived failed for parent order {parentOrderId}: {ex.Message}");
+        }
     }
 }
 

@@ -38,6 +38,12 @@ public class OrderDto
 
     /// <summary>У клиента уже есть отзыв по этому заказу.</summary>
     public bool HasCustomerReview { get; set; }
+
+    /// <summary>Id родительского заказа (если это подзаказ после частичной отправки).</summary>
+    public int? ParentOrderId { get; set; }
+
+    /// <summary>Подзаказы (только у корневого заказа в личном кабинете).</summary>
+    public List<OrderDto> ChildOrders { get; set; } = new();
 }
 
 /// <summary>
@@ -194,5 +200,5 @@ public class ReserveFromTelegramResultDto
 }
 
 /// <summary>Результат смены статуса заказа (админка / публичный endpoint для бота).</summary>
-public sealed record OrderStatusUpdateOutcome(bool Success, string? Message = null);
+public sealed record OrderStatusUpdateOutcome(bool Success, string? Message = null, bool RequiresSplitConfirmation = false);
 

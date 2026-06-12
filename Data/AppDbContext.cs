@@ -208,6 +208,12 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Condition3ItemsPercent);
             entity.Property(e => e.Condition5PlusPercent);
             entity.Property(e => e.CancellationReason).HasMaxLength(500);
+            entity.Property(e => e.ParentOrderId);
+            entity.HasIndex(e => e.ParentOrderId);
+            entity.HasOne(e => e.ParentOrder)
+                .WithMany(o => o.ChildOrders)
+                .HasForeignKey(e => e.ParentOrderId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.OrderNumber).IsUnique();
             entity.HasIndex(e => e.Status);
             entity.HasIndex(e => new { e.Status, e.UserId });

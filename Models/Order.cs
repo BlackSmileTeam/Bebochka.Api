@@ -112,5 +112,12 @@ public class Order
     /// Gets or sets the reason for order cancellation
     /// </summary>
     public string? CancellationReason { get; set; }
+
+    /// <summary>Родительский заказ при разбиении на частичные отправки (null — корневой заказ).</summary>
+    public int? ParentOrderId { get; set; }
+
+    public Order? ParentOrder { get; set; }
+
+    public List<Order> ChildOrders { get; set; } = new();
 }
 

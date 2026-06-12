@@ -47,8 +47,9 @@ public interface IOrderService
     /// </summary>
     /// <param name="orderId">Order ID</param>
     /// <param name="status">New status</param>
+    /// <param name="confirmSplit">Подтверждение разбиения при частичной отправке.</param>
     /// <returns>Результат: успех или сообщение об ошибке для ответа API.</returns>
-    Task<OrderStatusUpdateOutcome> UpdateOrderStatusAsync(int orderId, string status);
+    Task<OrderStatusUpdateOutcome> UpdateOrderStatusAsync(int orderId, string status, bool confirmSplit = false);
     
     /// <summary>
     /// Gets order statistics
