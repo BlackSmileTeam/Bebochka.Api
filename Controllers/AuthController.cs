@@ -78,7 +78,14 @@ public class AuthController : ControllerBase
 
         var normalized = NormalizeHost(host);
         if (!string.IsNullOrWhiteSpace(normalized) && IsAllowedFrontendHost(normalized))
+        {
+            if (normalized is not ("localhost" or "127.0.0.1")
+                && scheme.Equals("http", StringComparison.OrdinalIgnoreCase))
+            {
+                scheme = "https";
+            }
             return $"{scheme}://{normalized}".TrimEnd('/');
+        }
 
         var configured = _configuration["App:FrontendPublicUrl"]?.Trim();
         if (!string.IsNullOrWhiteSpace(configured))

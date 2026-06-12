@@ -333,10 +333,12 @@ jobs:
             DEPLOY_DIR="$HOME/bebochka-backend"
             HOST_PORT="${{ env.HOST_PORT }}"
             CONTAINER_PORT="${{ env.CONTAINER_PORT }}"
+            EDGE_NETWORK="bebochka-edge"
             CONN='${{ secrets.EDGE_DB_CONNECTION_STRING }}'
             echo "=== Prepare Selectel API (DB on FirstVDS) ==="
             mkdir -p "$DEPLOY_DIR/uploads" "$DEPLOY_DIR/logs" "$DEPLOY_DIR/wwwroot/uploads"
             chmod 777 "$DEPLOY_DIR/uploads" "$DEPLOY_DIR/wwwroot/uploads" 2>/dev/null || true
+            docker network create "$EDGE_NETWORK" 2>/dev/null || true
             umask 077
             cat > "$DEPLOY_DIR/.env" <<EOF
             ConnectionStrings__DefaultConnection=$CONN
@@ -357,6 +359,7 @@ jobs:
             docker run -d \
               --name $IMAGE_NAME \
               --restart unless-stopped \
+              --network "$EDGE_NETWORK" \
               -p ${HOST_PORT}:${CONTAINER_PORT} \
               -v $DEPLOY_DIR/wwwroot/uploads:/app/wwwroot/uploads \
               -e ASPNETCORE_ENVIRONMENT=Production \
