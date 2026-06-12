@@ -360,6 +360,7 @@ jobs:
               --name $IMAGE_NAME \
               --restart unless-stopped \
               --network "$EDGE_NETWORK" \
+              --add-host=host.docker.internal:host-gateway \
               -p ${HOST_PORT}:${CONTAINER_PORT} \
               -v $DEPLOY_DIR/wwwroot/uploads:/app/wwwroot/uploads \
               -e ASPNETCORE_ENVIRONMENT=Production \
