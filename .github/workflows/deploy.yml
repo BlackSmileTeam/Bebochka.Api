@@ -335,7 +335,9 @@ jobs:
             CONTAINER_PORT="${{ env.CONTAINER_PORT }}"
             EDGE_NETWORK="bebochka-edge"
             CONN='${{ secrets.EDGE_DB_CONNECTION_STRING }}'
-            echo "=== Prepare Selectel API (DB on FirstVDS) ==="
+            CONN="${CONN#APP_CONNECTION_STRING=}"
+            CONN="${CONN#ConnectionStrings__DefaultConnection=}"
+            echo "=== Prepare Selectel API (DB on host) ==="
             mkdir -p "$DEPLOY_DIR/uploads" "$DEPLOY_DIR/logs" "$DEPLOY_DIR/wwwroot/uploads"
             chmod 777 "$DEPLOY_DIR/uploads" "$DEPLOY_DIR/wwwroot/uploads" 2>/dev/null || true
             docker network create "$EDGE_NETWORK" 2>/dev/null || true
