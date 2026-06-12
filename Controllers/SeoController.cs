@@ -11,7 +11,11 @@ namespace Bebochka.Api.Controllers;
 [Route("api/seo")]
 public class SeoController : ControllerBase
 {
-    private const string SiteUrl = "https://bebochka.ru";
+    private static readonly string[] SiteUrls =
+    {
+        "https://bebochka.ru",
+        "https://www.bebochka.online"
+    };
     private readonly AppDbContext _db;
 
     public SeoController(AppDbContext db)
@@ -40,12 +44,15 @@ public class SeoController : ControllerBase
             var path = string.IsNullOrEmpty(slug) ? $"product/{p.Id}" : $"product/{p.Id}-{slug}";
             var lastmod = p.UpdatedAt.ToString("yyyy-MM-dd");
 
-            urlset.Add(
-                new XElement(ns + "url",
-                    new XElement(ns + "loc", $"{SiteUrl}/{path}"),
-                    new XElement(ns + "lastmod", lastmod),
-                    new XElement(ns + "changefreq", "weekly"),
-                    new XElement(ns + "priority", "0.7")));
+            foreach (var siteUrl in SiteUrls)
+            {
+                urlset.Add(
+                    new XElement(ns + "url",
+                        new XElement(ns + "loc", $"{siteUrl}/{path}"),
+                        new XElement(ns + "lastmod", lastmod),
+                        new XElement(ns + "changefreq", "weekly"),
+                        new XElement(ns + "priority", "0.7")));
+            }
         }
 
         var doc = new XDocument(new XDeclaration("1.0", "utf-8", null), urlset);
