@@ -672,7 +672,7 @@ public class ProductService : IProductService
             if (p.IncomingShipmentId.HasValue)
                 dto.IncomingShipmentName = shipmentNames.GetValueOrDefault(p.IncomingShipmentId.Value);
             if (p.KitId.HasValue)
-                await _kitService.EnrichProductDtoAsync(dto, null, null);
+                await _kitService.EnrichProductDtoAsync(dto, null, null, forAdminPanel: true);
             result.Add(dto);
         }
 

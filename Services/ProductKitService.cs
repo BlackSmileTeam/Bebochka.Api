@@ -157,13 +157,13 @@ public class ProductKitService : IProductKitService
         return true;
     }
 
-    public async Task<ProductKitOptionsDto?> GetKitOptionsAsync(int productId, string? sessionId, int? currentUserId)
+    public async Task<ProductKitOptionsDto?> GetKitOptionsAsync(int productId, string? sessionId, int? currentUserId, bool forAdminPanel = false)
     {
         var product = await _context.Products.AsNoTracking().FirstOrDefaultAsync(p => p.Id == productId);
         if (product?.KitId == null)
             return null;
 
-        if (product.IsTestProduct && !await IsAdminUserAsync(currentUserId))
+        if (product.IsTestProduct && !forAdminPanel && !await IsAdminUserAsync(currentUserId))
             return null;
 
         var kitId = product.KitId.Value;
@@ -226,7 +226,7 @@ public class ProductKitService : IProductKitService
         };
     }
 
-    public async Task EnrichProductDtoAsync(ProductDto dto, string? sessionId, int? currentUserId)
+    public async Task EnrichProductDtoAsync(ProductDto dto, string? sessionId, int? currentUserId, bool forAdminPanel = false)
     {
         if (!dto.KitId.HasValue)
         {
@@ -238,7 +238,7 @@ public class ProductKitService : IProductKitService
         var kit = await _context.ProductKits.AsNoTracking().FirstOrDefaultAsync(k => k.Id == dto.KitId);
         dto.KitPrice = kit?.KitPrice;
 
-        var options = await GetKitOptionsAsync(dto.Id, sessionId, currentUserId);
+        var options = await GetKitOptionsAsync(dto.Id, sessionId, currentUserId, forAdminPanel);
         if (options != null)
             dto.KitParts = options.Parts;
     }
