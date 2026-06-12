@@ -400,8 +400,8 @@ public class ProductsController : ControllerBase
         var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            // Get existing product
-            var existingProduct = await _productService.GetProductByIdAsync(id);
+            var uid = await TryGetUserIdFromBearerAsync();
+            var existingProduct = await _productService.GetProductByIdAsync(id, currentUserId: uid);
             if (existingProduct == null)
                 return NotFound();
 
