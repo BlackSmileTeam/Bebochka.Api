@@ -475,17 +475,28 @@ public class OrderService : IOrderService
         if (order == null)
             return false;
 
-        // При удалении заказа возвращаем товары в общий доступный список.
-        foreach (var item in order.OrderItems)
+        var childOrders = await _context.Orders
+            .Include(o => o.OrderItems)
+            .Where(o => o.ParentOrderId == orderId)
+            .ToListAsync();
+
+        // Сначала дочерние заказы (FK ParentOrderId), затем родитель.
+        var ordersToDelete = childOrders.Append(order).ToList();
+
+        foreach (var o in ordersToDelete)
         {
-            var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
-            if (product != null)
+            foreach (var item in o.OrderItems)
             {
-                product.QuantityInStock += item.Quantity;
+                var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
+                if (product != null)
+                    product.QuantityInStock += item.Quantity;
             }
         }
 
+        foreach (var child in childOrders)
+            _context.Orders.Remove(child);
         _context.Orders.Remove(order);
+
         await _context.SaveChangesAsync();
         return true;
     }
