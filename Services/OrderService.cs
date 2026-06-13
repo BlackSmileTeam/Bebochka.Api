@@ -203,7 +203,23 @@ public class OrderService : IOrderService
             .Select(r => r.OrderId!.Value)
             .ToListAsync()).ToHashSet();
 
-        return orders.Select(o => MapToDto(o, users.GetValueOrDefault(o.UserId ?? 0), reviewedOrderIds.Contains(o.Id))).ToList();
+        var rootOrders = orders.Where(o => o.ParentOrderId == null).OrderByDescending(o => o.CreatedAt).ToList();
+        var childrenByParent = orders
+            .Where(o => o.ParentOrderId.HasValue)
+            .GroupBy(o => o.ParentOrderId!.Value)
+            .ToDictionary(g => g.Key, g => g.OrderBy(o => o.OrderNumber).ToList());
+
+        return rootOrders.Select(o =>
+        {
+            var dto = MapToDto(o, users.GetValueOrDefault(o.UserId ?? 0), reviewedOrderIds.Contains(o.Id));
+            if (childrenByParent.TryGetValue(o.Id, out var children))
+            {
+                dto.ChildOrders = children
+                    .Select(c => MapToDto(c, users.GetValueOrDefault(c.UserId ?? 0), reviewedOrderIds.Contains(c.Id)))
+                    .ToList();
+            }
+            return dto;
+        }).ToList();
     }
 
     public async Task<OrderDto?> GetOrderByIdAsync(int id)
@@ -1092,7 +1108,7 @@ public class OrderService : IOrderService
         foreach (var item in inParcelItems)
         {
             item.OrderId = shippedChild.Id;
-            item.AddedToParcel = false;
+            item.AddedToParcel = true;
         }
         foreach (var item in notInParcelItems)
         {
