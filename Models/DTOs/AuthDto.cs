@@ -172,11 +172,6 @@ public class UserDto
     public DateTime? LastLoginAt { get; set; }
 
     /// <summary>
-    /// Gets or sets preferred custom emoji id for channel posts (Telegram custom_emoji_id)
-    /// </summary>
-    public string? ChannelCustomEmojiId { get; set; }
-
-    /// <summary>
     /// Администратор (доступ в админку)
     /// </summary>
     public bool IsAdmin { get; set; }
@@ -211,27 +206,5 @@ public class ChangePasswordDto
     /// Gets or sets the new password
     /// </summary>
     public string NewPassword { get; set; } = string.Empty;
-}
-
-/// <summary>
-/// Data transfer object for linking Telegram User ID
-/// </summary>
-public class LinkTelegramUserIdDto
-{
-    /// <summary>
-    /// Gets or sets the Telegram User ID
-    /// </summary>
-    public long TelegramUserId { get; set; }
-}
-
-/// <summary>
-/// Request DTO for updating current user's channel emoji preference
-/// </summary>
-public class UpdateChannelEmojiDto
-{
-    /// <summary>
-    /// Gets or sets the Telegram custom_emoji_id to use in channel posts (null/empty to reset)
-    /// </summary>
-    public string? EmojiId { get; set; }
 }
 

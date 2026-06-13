@@ -536,7 +536,6 @@ public class AuthService : IAuthService
         Phone = user.Phone,
         FullName = user.FullName,
         CreatedAt = user.CreatedAt,
-        ChannelCustomEmojiId = user.ChannelCustomEmojiId,
         IsAdmin = user.IsAdmin
     };
 

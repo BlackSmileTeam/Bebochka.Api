@@ -28,7 +28,7 @@ public class OrderService : IOrderService
 
     private readonly AppDbContext _context;
     private readonly IEmailService _emailService;
-    private readonly ITelegramNotificationService _telegramService;
+    private readonly WebReserveQueueService _queueService;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IWebHostEnvironment _environment;
     private readonly IReferralService _referralService;
@@ -36,14 +36,14 @@ public class OrderService : IOrderService
     public OrderService(
         AppDbContext context,
         IEmailService emailService,
-        ITelegramNotificationService telegramService,
+        WebReserveQueueService queueService,
         IHttpContextAccessor httpContextAccessor,
         IWebHostEnvironment environment,
         IReferralService referralService)
     {
         _context = context;
         _emailService = emailService;
-        _telegramService = telegramService;
+        _queueService = queueService;
         _httpContextAccessor = httpContextAccessor;
         _environment = environment;
         _referralService = referralService;
@@ -427,67 +427,6 @@ public class OrderService : IOrderService
         if (status == "Отправлен" && order.ParentOrderId.HasValue)
             await TryPromoteParentWhenAllChildrenShippedAsync(order.ParentOrderId.Value);
 
-        var user = order.UserId.HasValue ? await _context.Users.FindAsync(order.UserId.Value) : null;
-        var telegramUserId = user?.TelegramUserId;
-        if (telegramUserId.HasValue)
-        {
-            var statusText = status switch
-            {
-                "Формирование заказа" => "формирование заказа",
-                "Ожидает оплату" => "ожидает оплату",
-                "Копим" => "копим",
-                "Оплачен" => "оплачен",
-                "В сборке" => "в сборке",
-                "На доставку" => "на доставку",
-                "Отправлен" => "отправлен",
-                "Отменен" => "отменён",
-                _ => status
-            };
-            if (status == "Ожидает оплату" && previousStatus != "Ожидает оплату")
-            {
-                await _telegramService.SendMessageAsync(telegramUserId.Value,
-                    $"<b>Заказ {order.OrderNumber} успешно оформлен</b>\nНеобходимо оплатить заказ. После оплаты мы соберём и отправим его.");
-            }
-            else
-            {
-                await _telegramService.SendMessageAsync(telegramUserId.Value,
-                    $"<b>Статус заказа {order.OrderNumber} изменён</b>\nНовый статус: {statusText}.");
-            }
-
-            if (status == "В сборке")
-            {
-                var orderWithItems = await _context.Orders
-                    .Include(o => o.OrderItems)
-                    .ThenInclude(oi => oi.Product)
-                    .FirstOrDefaultAsync(o => o.Id == orderId);
-                if (orderWithItems?.OrderItems != null)
-                {
-                    var req = _httpContextAccessor.HttpContext?.Request;
-                    var baseUrl = req != null ? $"{req.Scheme}://{req.Host}" : null;
-                    if (!string.IsNullOrEmpty(baseUrl))
-                    {
-                        foreach (var oi in orderWithItems.OrderItems.Where(oi => oi.Product != null))
-                        {
-                            var p = oi.Product!;
-                            var imagePaths = p.Images ?? new List<string>();
-                            var imageUrls = imagePaths
-                                .Select(path => path.StartsWith("http") ? path : (path.StartsWith("/") ? $"{baseUrl.TrimEnd('/')}{path}" : $"{baseUrl.TrimEnd('/')}/{path.TrimStart('/')}"))
-                                .ToList();
-                            if (imageUrls.Count > 0)
-                            {
-                                var caption = $"<b>{p.Name}</b>";
-                                if (!string.IsNullOrEmpty(p.Brand)) caption += $"\nБренд: {p.Brand}";
-                                if (!string.IsNullOrEmpty(p.Size)) caption += $"\nРазмер: {p.Size}";
-                                if (!string.IsNullOrEmpty(p.Color)) caption += $"\nЦвет: {p.Color}";
-                                caption += $"\nЦена: {p.Price:N0} ₽";
-                                await _telegramService.SendPhotosToUserByUrlsAsync(telegramUserId.Value, imageUrls, caption);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         return new OrderStatusUpdateOutcome(true);
     }
 
@@ -520,12 +459,8 @@ public class OrderService : IOrderService
             return false;
 
         // При удалении заказа возвращаем товары в общий доступный список.
-        // Исключение: позиции, добавленные из Telegram-резерва, не уменьшали остаток при создании.
         foreach (var item in order.OrderItems)
         {
-            if (item.TelegramCommentChatId.HasValue)
-                continue;
-
             var product = await _context.Products.FirstOrDefaultAsync(p => p.Id == item.ProductId);
             if (product != null)
             {
@@ -550,105 +485,16 @@ public class OrderService : IOrderService
         if (item.Order.Status != "В сборке")
             return false;
 
-        if (item.TelegramCommentChatId.HasValue && item.TelegramCommentMessageId.HasValue)
-        {
-            try
-            {
-                await _telegramService.DeleteMessageAsync(item.TelegramCommentChatId.Value, item.TelegramCommentMessageId.Value);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"DeleteOrderItem: failed to delete Telegram comment: {ex.Message}");
-            }
-        }
-
         var order = item.Order;
         var product = item.Product;
-        // Остаток не трогаем для заказов через канал (при брони из канала мы его не уменьшали)
-        if (!item.TelegramCommentChatId.HasValue)
-            product.QuantityInStock += item.Quantity;
+        product.QuantityInStock += item.Quantity;
         order.TotalAmount -= item.ProductPrice * item.Quantity;
         order.UpdatedAt = DateTime.UtcNow;
         _context.OrderItems.Remove(item);
 
-        var nextQueue = await _context.ReserveQueue
-            .Where(rq => rq.ProductId == product.Id && rq.WebUserId == null && rq.TelegramUserId != null)
-            .OrderBy(rq => rq.CreatedAt)
-            .FirstOrDefaultAsync();
-
-        if (nextQueue != null)
-        {
-            var nextUser = await _context.Users.FirstOrDefaultAsync(u => u.TelegramUserId == nextQueue.TelegramUserId);
-            if (nextUser != null)
-            {
-                var customerName = $"{nextQueue.FirstName ?? ""} {nextQueue.LastName ?? ""}".Trim();
-                if (string.IsNullOrEmpty(customerName))
-                    customerName = !string.IsNullOrEmpty(nextQueue.Username) ? $"@{nextQueue.Username}" : nextUser.FullName ?? nextUser.Username ?? $"Telegram {nextQueue.TelegramUserId}";
-                var phone = nextQueue.CustomerPhone ?? "";
-
-                var newOrderItem = new OrderItem
-                {
-                    ProductId = product.Id,
-                    ProductName = product.Name,
-                    ProductPrice = product.Price,
-                    Quantity = 1,
-                    TelegramCommentChatId = nextQueue.CommentChatId != 0 ? nextQueue.CommentChatId : null,
-                    TelegramCommentMessageId = nextQueue.CommentMessageId != 0 ? nextQueue.CommentMessageId : null
-                };
-
-                var statusesAllowedToAdd = new[] { "Формирование заказа", "Ожидает оплату", "Оплачен" };
-                var existingOrder = await _context.Orders
-                    .Include(o => o.OrderItems)
-                    .Where(o => o.UserId == nextUser.Id && statusesAllowedToAdd.Contains(o.Status))
-                    .OrderByDescending(o => o.CreatedAt)
-                    .FirstOrDefaultAsync();
-
-                var nextUserProfileLink = nextUser.TelegramUserId.HasValue ? "tg://openmessage?user_id=" + nextUser.TelegramUserId.Value : null;
-                if (existingOrder != null)
-                {
-                    existingOrder.OrderItems.Add(newOrderItem);
-                    existingOrder.TotalAmount += product.Price;
-                    existingOrder.CustomerName = customerName;
-                    existingOrder.CustomerProfileLink = nextUserProfileLink ?? existingOrder.CustomerProfileLink;
-                    if (!string.IsNullOrWhiteSpace(phone)) existingOrder.CustomerPhone = phone;
-                    existingOrder.UpdatedAt = DateTime.UtcNow;
-                }
-                else
-                {
-                    var orderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
-                    var newOrder = new Order
-                    {
-                        OrderNumber = orderNumber,
-                        UserId = nextUser.Id,
-                        CustomerName = customerName,
-                        CustomerProfileLink = nextUserProfileLink,
-                        CustomerPhone = phone,
-                        CustomerEmail = nextUser.Email,
-                        TotalAmount = product.Price,
-                        Status = "Ожидает оплату",
-                        OrderItems = new List<OrderItem> { newOrderItem },
-                        CreatedAt = DateTime.UtcNow,
-                        UpdatedAt = DateTime.UtcNow
-                    };
-                    newOrder.StatusHistories.Add(new OrderStatusHistory
-                    {
-                        Status = newOrder.Status,
-                        ChangedAtUtc = DateTime.UtcNow,
-                        ChangedByUserId = nextUser.Id
-                    });
-                    _context.Orders.Add(newOrder);
-                }
-                // При передаче следующему в очереди остаток не уменьшаем (заказы через канал не меняют остаток)
-                // Товар снова в одном заказе — остальные в очереди по этому товару неактуальны
-                await RemoveReserveQueueForProductsAsync(new[] { product.Id });
-            }
-            else
-            {
-                _context.ReserveQueue.Remove(nextQueue);
-            }
-        }
-
         await _context.SaveChangesAsync();
+
+        await _queueService.PromoteNextAfterCartReleaseAsync(product.Id);
 
         var itemsLeft = await _context.OrderItems.CountAsync(oi => oi.OrderId == orderId);
         if (itemsLeft == 0)
@@ -672,153 +518,6 @@ public class OrderService : IOrderService
         item.AddedToParcel = addedToParcel;
         await _context.SaveChangesAsync();
         return true;
-    }
-
-    public async Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName, string? customerPhone = null, long? commentChatId = null, int? commentMessageId = null)
-    {
-        var product = await _context.Products
-            .FirstOrDefaultAsync(p => p.TelegramChatId == channelId && p.TelegramMessageId == messageId);
-        if (product == null)
-            return new ReserveFromTelegramResultDto { Success = false, Reason = "ProductNotFound" };
-
-        var activeStatuses = new[] { "Ожидает оплату", "Оплачен", "В сборке", "На доставку", "Отправлен", StatusReceived };
-        var alreadyReserved = await _context.OrderItems
-            .AnyAsync(oi => oi.ProductId == product.Id && _context.Orders.Any(o => o.Id == oi.OrderId && activeStatuses.Contains(o.Status)));
-        if (alreadyReserved)
-        {
-            var queueEntry = new ReserveQueue
-            {
-                ProductId = product.Id,
-                ChannelId = channelId,
-                PostMessageId = messageId,
-                TelegramUserId = telegramUserId,
-                Username = username,
-                FirstName = firstName,
-                LastName = lastName,
-                CustomerPhone = customerPhone,
-                CommentChatId = commentChatId ?? 0,
-                CommentMessageId = commentMessageId ?? 0,
-                CreatedAt = DateTime.UtcNow
-            };
-            if (commentChatId.HasValue && commentMessageId.HasValue)
-            {
-                queueEntry.CommentChatId = commentChatId.Value;
-                queueEntry.CommentMessageId = commentMessageId.Value;
-            }
-            _context.ReserveQueue.Add(queueEntry);
-            await _context.SaveChangesAsync();
-            return new ReserveFromTelegramResultDto { Success = false, Reason = "AlreadyReserved" };
-        }
-
-        // Бронировать может только один пользователь, товар один — остаток не проверяем и не уменьшаем.
-        // Пользователь: если есть в базе — берём его; если нет — создаём (товар попадает в существующий заказ в начальном статусе или создаётся новый).
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.TelegramUserId == telegramUserId);
-        if (user == null)
-        {
-            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-            var newUsername = $"telegram_{telegramUserId}_{timestamp}";
-            user = new User
-            {
-                Username = newUsername,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword(Guid.NewGuid().ToString()),
-                TelegramUserId = telegramUserId,
-                FullName = $"{firstName ?? ""} {lastName ?? ""}".Trim(),
-                IsActive = true,
-                IsAdmin = false,
-                CreatedAt = DateTime.UtcNow
-            };
-            if (string.IsNullOrWhiteSpace(user.FullName))
-                user.FullName = !string.IsNullOrEmpty(username) ? $"@{username}" : null;
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
-        }
-
-        // Имя заказчика: из Telegram (имя/фамилия или @username), иначе из профиля User
-        var customerName = $"{firstName ?? ""} {lastName ?? ""}".Trim();
-        if (string.IsNullOrEmpty(customerName))
-            customerName = !string.IsNullOrEmpty(username) ? $"@{username}" : null;
-        if (string.IsNullOrEmpty(customerName))
-            customerName = user.FullName ?? user.Username;
-        if (string.IsNullOrEmpty(customerName))
-            customerName = $"Telegram {telegramUserId}";
-
-        var customerProfileLink = !string.IsNullOrEmpty(username)
-            ? "https://t.me/" + username.TrimStart('@')
-            : "tg://openmessage?user_id=" + telegramUserId;
-
-        var orderItem = new OrderItem
-        {
-            ProductId = product.Id,
-            ProductName = product.Name,
-            ProductPrice = product.Price,
-            Quantity = 1,
-            TelegramCommentChatId = commentChatId,
-            TelegramCommentMessageId = commentMessageId
-        };
-
-        // Добавляем в существующий заказ только в начальных статусах; иначе создаём новый
-        var statusesAllowedToAdd = new[] { "Формирование заказа", "Ожидает оплату", "Оплачен" };
-        var existingOrder = await _context.Orders
-            .Include(o => o.OrderItems)
-            .Where(o => o.UserId == user.Id && statusesAllowedToAdd.Contains(o.Status))
-            .OrderByDescending(o => o.CreatedAt)
-            .FirstOrDefaultAsync();
-
-        Order order;
-        var phone = !string.IsNullOrWhiteSpace(customerPhone) ? customerPhone.Trim() : "";
-
-        if (existingOrder != null)
-        {
-            order = existingOrder;
-            order.OrderItems.Add(orderItem);
-            order.TotalAmount += product.Price;
-            order.CustomerName = customerName;
-            order.CustomerProfileLink = customerProfileLink;
-            if (!string.IsNullOrEmpty(phone))
-                order.CustomerPhone = phone;
-            order.UpdatedAt = DateTime.UtcNow;
-        }
-        else
-        {
-            var orderNumber = $"ORD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
-            order = new Order
-            {
-                OrderNumber = orderNumber,
-                UserId = user.Id,
-                CustomerName = customerName,
-                CustomerProfileLink = customerProfileLink,
-                CustomerPhone = phone,
-                CustomerEmail = user.Email,
-                TotalAmount = product.Price,
-                Status = "Ожидает оплату",
-                OrderItems = new List<OrderItem> { orderItem },
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            };
-            order.StatusHistories.Add(new OrderStatusHistory
-            {
-                Status = order.Status,
-                ChangedAtUtc = DateTime.UtcNow,
-                ChangedByUserId = user.Id
-            });
-            _context.Orders.Add(order);
-        }
-
-        // Количество на складе при оформлении заказа через канал не уменьшаем
-        await RemoveReserveQueueForProductsAsync(new[] { product.Id });
-        await _context.SaveChangesAsync();
-
-        try
-        {
-            await _emailService.SendOrderNotificationAsync(order);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Failed to send order email for telegram reserve: {ex.Message}");
-        }
-
-        var hasReview = await _context.OrderCustomerReviews.AnyAsync(r => r.OrderId == order.Id);
-        return new ReserveFromTelegramResultDto { Success = true, Order = MapToDto(order, user, hasReview) };
     }
 
     public async Task<OrderDto> MarkOrderReceivedByCustomerAsync(int orderId, int userId, int? rating, string? comment)
@@ -1326,9 +1025,7 @@ public class OrderService : IOrderService
             CancelledAt = order.CancelledAt,
             CancellationReason = order.CancellationReason,
             UserId = order.UserId,
-            CustomerProfileLink = order.CustomerProfileLink ?? (user?.TelegramUserId != null ? "tg://openmessage?user_id=" + user.TelegramUserId : null),
-            TelegramUserId = user?.TelegramUserId,
-            TelegramUsername = user != null ? (user.FullName ?? (user.Username != null && !user.Username.StartsWith("telegram_") ? user.Username : null)) ?? order.CustomerName : null,
+            CustomerProfileLink = order.CustomerProfileLink,
             StatusHistory = history,
             HasCustomerReview = hasCustomerReview,
             ParentOrderId = order.ParentOrderId
@@ -1414,16 +1111,6 @@ public class OrderService : IOrderService
 
         await _context.SaveChangesAsync();
 
-        var user = parent.UserId.HasValue ? await _context.Users.FindAsync(parent.UserId.Value) : null;
-        var telegramUserId = user?.TelegramUserId;
-        if (telegramUserId.HasValue)
-        {
-            await _telegramService.SendMessageAsync(telegramUserId.Value,
-                $"<b>Заказ {parent.OrderNumber} отправлен частично</b>\n" +
-                $"Первая посылка ({shippedChild.OrderNumber}) уже в пути.\n" +
-                $"Оставшиеся позиции ({pendingChild.OrderNumber}) — в сборке, отправим позже.");
-        }
-
         return new OrderStatusUpdateOutcome(true);
     }
 
@@ -1446,16 +1133,6 @@ public class OrderService : IOrderService
         parent.UpdatedAt = DateTime.UtcNow;
         AddStatusHistory(parent.Id, "Отправлен", null);
         await _context.SaveChangesAsync();
-
-        if (parent.UserId.HasValue)
-        {
-            var user = await _context.Users.FindAsync(parent.UserId.Value);
-            if (user?.TelegramUserId is long tgId)
-            {
-                await _telegramService.SendMessageAsync(tgId,
-                    $"<b>Заказ {parent.OrderNumber} полностью отправлен</b>\nВсе части заказа переданы в доставку.");
-            }
-        }
     }
 
     private async Task TryPromoteParentWhenAllChildrenReceivedAsync(int parentOrderId, int userId)

@@ -4,7 +4,6 @@ using Bebochka.Api.Data;
 using Bebochka.Api.Helpers;
 using Bebochka.Api.Models;
 using Microsoft.EntityFrameworkCore;
-using MySqlConnector;
 
 namespace Bebochka.Api.Services;
 
@@ -93,10 +92,6 @@ public class BackupService
                 .Where(c => c.CreatedAt >= fromUtc && c.CreatedAt <= toUtc)
                 .ToListAsync(ct);
 
-            var announcements = await db.Announcements.AsNoTracking()
-                .Where(a => a.CreatedAt >= fromUtc && a.CreatedAt <= toUtc)
-                .ToListAsync(ct);
-
             var shipments = await db.IncomingShipments.AsNoTracking()
                 .Where(s => s.CreatedAt >= fromUtc && s.CreatedAt <= toUtc)
                 .ToListAsync(ct);
@@ -109,26 +104,13 @@ public class BackupService
                 .Where(r => r.CreatedAt >= fromUtc && r.CreatedAt <= toUtc)
                 .ToListAsync(ct);
 
-            List<TelegramError> telegramErrors;
-            try
-            {
-                telegramErrors = await db.TelegramErrors.AsNoTracking()
-                    .Where(e => e.ErrorDate >= fromUtc && e.ErrorDate <= toUtc)
-                    .ToListAsync(ct);
-            }
-            catch (Exception ex) when (IsTelegramErrorsUnavailable(ex))
-            {
-                // Старая схема: нет таблицы или колонки ImageCount — бэкап без ошибок Telegram.
-                telegramErrors = new List<TelegramError>();
-            }
-
             var consentLogs = await db.PersonalDataConsentLogs.AsNoTracking()
                 .Where(l => l.AcceptedAtUtc >= fromUtc && l.AcceptedAtUtc <= toUtc)
                 .ToListAsync(ct);
 
             _jobs.SetProgress(jobId, 32, "Сбор путей к фотографиям…");
 
-            var imagePaths = CollectImagePaths(products, reviews, announcements);
+            var imagePaths = CollectImagePaths(products, reviews);
             var filesToZip = ResolveUploadFiles(uploadsDir, imagePaths);
 
             if (File.Exists(zipPath))
@@ -148,11 +130,9 @@ public class BackupService
                 await WriteJsonEntryAsync(zip, "data/order_customer_reviews.json", reviews, ct);
                 await WriteJsonEntryAsync(zip, "data/users.json", users, ct);
                 await WriteJsonEntryAsync(zip, "data/cart_items.json", cartItems, ct);
-                await WriteJsonEntryAsync(zip, "data/announcements.json", announcements, ct);
                 await WriteJsonEntryAsync(zip, "data/incoming_shipments.json", shipments, ct);
                 await WriteJsonEntryAsync(zip, "data/incoming_shipment_expenses.json", miscExpenses, ct);
                 await WriteJsonEntryAsync(zip, "data/reserve_queue.json", reserveQueue, ct);
-                await WriteJsonEntryAsync(zip, "data/telegram_errors.json", telegramErrors, ct);
                 await WriteJsonEntryAsync(zip, "data/personal_data_consent_logs.json", consentLogs, ct);
 
                 _jobs.SetProgress(jobId, 48, "Манифест…");
@@ -219,8 +199,7 @@ public class BackupService
 
     private static HashSet<string> CollectImagePaths(
         List<Product> products,
-        List<OrderCustomerReview> reviews,
-        List<Announcement> announcements)
+        List<OrderCustomerReview> reviews)
     {
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var p in products)
@@ -238,11 +217,6 @@ public class BackupService
                     AddImagePath(paths, img);
             }
             catch { /* skip invalid json */ }
-        }
-        foreach (var a in announcements)
-        {
-            foreach (var img in a.CollageImages)
-                AddImagePath(paths, img);
         }
         return paths;
     }
@@ -275,22 +249,5 @@ public class BackupService
                 list.Add((rel.Replace('\\', '/'), full));
         }
         return list;
-    }
-
-    private static bool IsTelegramErrorsUnavailable(Exception ex)
-    {
-        for (var current = ex; current != null; current = current.InnerException)
-        {
-            var msg = current.Message;
-            if (msg.Contains("telegramerrors", StringComparison.OrdinalIgnoreCase))
-                return true;
-            if (msg.Contains("ImageCount", StringComparison.OrdinalIgnoreCase)
-                && msg.Contains("Unknown column", StringComparison.OrdinalIgnoreCase))
-                return true;
-            if (current is MySqlException mysql && mysql.Number == 1054)
-                return msg.Contains("ImageCount", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return false;
     }
 }

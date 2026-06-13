@@ -60,25 +60,6 @@ public class Product
     }
     
     /// <summary>
-    /// Gets or sets the JSON string of Telegram file_id for each image (pre-cached for fast publish).
-    /// </summary>
-    public string? TelegramFileIdsJson { get; set; }
-    
-    /// <summary>
-    /// Gets or sets the list of Telegram file_id for each image (same order as Images).
-    /// When set, channel send uses these instead of re-uploading.
-    /// </summary>
-    public List<string>? TelegramFileIds
-    {
-        get => string.IsNullOrEmpty(TelegramFileIdsJson) 
-            ? null 
-            : JsonSerializer.Deserialize<List<string>>(TelegramFileIdsJson);
-        set => TelegramFileIdsJson = value == null || value.Count == 0 
-            ? null 
-            : JsonSerializer.Serialize(value);
-    }
-    
-    /// <summary>
     /// Gets or sets the date and time when the product was created
     /// </summary>
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -119,17 +100,6 @@ public class Product
     /// Moscow time: "В корзину" is enabled at or after this moment. If null, same as catalog visibility rules.
     /// </summary>
     public DateTime? CartAvailableAt { get; set; }
-
-    /// <summary>
-    /// Telegram channel message ID of the post (for linking comments/reservations).
-    /// </summary>
-    public int? TelegramMessageId { get; set; }
-
-    /// <summary>
-    /// Telegram channel/chat ID (e.g. -1001234567890) where the product was posted.
-    /// Stored as string to avoid issues with different ID formats.
-    /// </summary>
-    public string? TelegramChatId { get; set; }
 
     /// <summary>
     /// Gets or sets box identifier where product is currently stored (admin only field).

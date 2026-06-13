@@ -582,7 +582,6 @@ public class CartController : ControllerBase
             ProductId = dto.ProductId,
             ChannelId = "web",
             PostMessageId = 0,
-            TelegramUserId = null,
             WebUserId = userId,
             CreatedAt = DateTime.UtcNow
         });

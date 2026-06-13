@@ -28,7 +28,8 @@ public interface IProductService
         string? gender,
         string? condition,
         string? sort,
-        bool includeFacets);
+        bool includeFacets,
+        bool publicOnly = false);
 
     /// <summary>
     /// Gets a product by its unique identifier
@@ -75,7 +76,7 @@ public interface IProductService
     Task<List<ProductDto>> GetAllProductsForAdminAsync();
     
     /// <summary>
-    /// Gets all unpublished products (for announcement selection)
+    /// Gets all unpublished products (admin).
     /// </summary>
     /// <returns>List of unpublished products</returns>
     Task<List<ProductDto>> GetUnpublishedProductsAsync();

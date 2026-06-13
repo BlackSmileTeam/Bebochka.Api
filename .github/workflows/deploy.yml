@@ -228,8 +228,6 @@ jobs:
             Vk__AppId=${{ secrets.VK_APP_ID }}
             Vk__SecureKey=${{ secrets.VK_SECURE_KEY }}
             Vk__RedirectUri=https://bebochka.ru/api/auth/vk/callback
-            TelegramBot__Token=${{ secrets.TELEGRAM_BOT_TOKEN }}
-            TelegramBot__ChannelId=${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}
             EOF
             chmod 600 "$DEPLOY_DIR/.env"
             test -f "$DEPLOY_DIR/.env" && echo "OK .env"
@@ -256,8 +254,6 @@ jobs:
               -e Vk__AppId='${{ secrets.VK_APP_ID }}' \
               -e Vk__SecureKey='${{ secrets.VK_SECURE_KEY }}' \
               -e Vk__RedirectUri=https://bebochka.ru/api/auth/vk/callback \
-              -e TelegramBot__Token='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
-              -e TelegramBot__ChannelId='${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}' \
               $IMAGE_NAME:latest
             sleep 4
             docker ps --filter "name=$IMAGE_NAME"
@@ -350,8 +346,6 @@ jobs:
             App__RunBackgroundJobs=false
             Vk__AppId=${{ secrets.VK_APP_ID }}
             Vk__SecureKey=${{ secrets.VK_SECURE_KEY }}
-            TelegramBot__Token=${{ secrets.TELEGRAM_BOT_TOKEN }}
-            TelegramBot__ChannelId=${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}
             EOF
             chmod 600 "$DEPLOY_DIR/.env"
             docker load < /tmp/$IMAGE_NAME.tar.gz
@@ -373,8 +367,6 @@ jobs:
               -e App__RunBackgroundJobs=false \
               -e Vk__AppId='${{ secrets.VK_APP_ID }}' \
               -e Vk__SecureKey='${{ secrets.VK_SECURE_KEY }}' \
-              -e TelegramBot__Token='${{ secrets.TELEGRAM_BOT_TOKEN }}' \
-              -e TelegramBot__ChannelId='${{ secrets.TELEGRAM_BOT_CHANNEL_ID }}' \
               $IMAGE_NAME:latest
             sleep 4
             docker ps --filter "name=$IMAGE_NAME"
@@ -391,4 +383,4 @@ jobs:
           echo "- Host: \`${{ secrets.EDGE_PROD_HOST }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Port: **${{ env.HOST_PORT }}**" >> "$GITHUB_STEP_SUMMARY"
           echo "- DB: FirstVDS (EDGE_DB_CONNECTION_STRING)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Background jobs: **off** (Telegram только на FirstVDS)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Background jobs: **off** (edge API)" >> "$GITHUB_STEP_SUMMARY"

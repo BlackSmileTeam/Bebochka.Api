@@ -117,7 +117,8 @@ public class ProductsController : ControllerBase
         [FromQuery] string? gender = null,
         [FromQuery] string? condition = null,
         [FromQuery] string? sort = null,
-        [FromQuery] bool includeFacets = true)
+        [FromQuery] bool includeFacets = true,
+        [FromQuery] bool publicOnly = false)
     {
         var uid = await TryGetUserIdFromBearerAsync();
         var result = await _productService.GetCatalogPageAsync(
@@ -131,7 +132,8 @@ public class ProductsController : ControllerBase
             gender,
             condition,
             sort,
-            includeFacets);
+            includeFacets,
+            publicOnly);
         return Ok(result);
     }
 
@@ -297,70 +299,6 @@ public class ProductsController : ControllerBase
             totalStopwatch.Stop();
             Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] CreateProduct: загрузка/обработка контента (декодирование и запись изображений) = {contentStopwatch.ElapsedMilliseconds} мс, сохранение в БД = {dbStopwatch.ElapsedMilliseconds} мс, всего в действии = {totalStopwatch.ElapsedMilliseconds} мс ({totalStopwatch.Elapsed.TotalSeconds:F2} с)");
 
-            // Ответ сразу после записи в БД. Пользователь получает ответ и может готовить следующую карточку.
-            // Загрузка фото в кэш Telegram и отправка в канал — в фоне, в отдельном scope (не используем scoped-сервисы запроса).
-            var baseUrl = $"{Request.Scheme}://{Request.Host}";
-            var scopeFactory = _scopeFactory;
-            var productId = product.Id;
-            var hasImages = product.Images != null && product.Images.Count > 0;
-            var publishToChannel = _configuration.GetValue("Telegram:PostNewProductsToChannel", false) && dto.PublishedAt.HasValue;
-            string? caption = null;
-            List<string>? imageUrls = null;
-            if (publishToChannel)
-            {
-                caption = $"{product.Name}\n";
-                if (!string.IsNullOrEmpty(product.Brand)) caption += $"🤩 Бренд: {product.Brand}\n";
-                if (!string.IsNullOrEmpty(product.Size)) caption += $"🤩 Размер: {product.Size}\n";
-                if (!string.IsNullOrEmpty(product.Color)) caption += $"🤩 Цвет: {product.Color}\n";
-                if (!string.IsNullOrEmpty(product.Gender)) caption += $"🤩 Пол: {product.Gender}\n";
-                if (!string.IsNullOrEmpty(product.Condition)) caption += $"🤩 Состояние: {product.Condition}\n";
-                if (!string.IsNullOrEmpty(product.Description)) caption += $"\n🤩 {product.Description}\n";
-                caption += $"\n🤩 Цена: {product.Price:N0} ₽\n";
-                if (product.Images != null && product.Images.Any())
-                {
-                    imageUrls = new List<string>();
-                    foreach (var imagePath in product.Images)
-                    {
-                        if (string.IsNullOrEmpty(imagePath)) continue;
-                        if (imagePath.StartsWith("http")) imageUrls.Add(imagePath);
-                        else if (imagePath.StartsWith("/")) imageUrls.Add($"{baseUrl}{imagePath}");
-                        else imageUrls.Add($"{baseUrl}/{imagePath.TrimStart('/')}");
-                    }
-                }
-            }
-
-            // Resolve current user's preferred channel emoji (Telegram custom_emoji_id)
-            string? channelEmojiId = null;
-            var userIdClaim = User.FindFirst("UserId")?.Value
-                              ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            if (!string.IsNullOrEmpty(userIdClaim) && int.TryParse(userIdClaim, out var currentUserId))
-            {
-                var currentUser = await _context.Users.FindAsync(currentUserId);
-                channelEmojiId = currentUser?.ChannelCustomEmojiId;
-            }
-
-            _ = Task.Run(async () =>
-            {
-                using var scope = scopeFactory.CreateScope();
-                var telegramService = scope.ServiceProvider.GetRequiredService<ITelegramNotificationService>();
-                try
-                {
-                    if (hasImages)
-                        await telegramService.PreCacheProductImagesAsync(productId, baseUrl);
-                    if (publishToChannel && caption != null)
-                    {
-                        if (imageUrls != null && imageUrls.Count > 0)
-                            await telegramService.SendMessageToChannelWithPhotosAsync(caption, imageUrls, null, channelEmojiId);
-                        else
-                            await telegramService.SendMessageToChannelAsync(caption, channelEmojiId);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] Background Telegram error: {ex.Message}");
-                }
-            });
-
             return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, product);
         }
         catch (InvalidOperationException ex)
@@ -473,24 +411,6 @@ public class ProductsController : ControllerBase
 
             totalStopwatch.Stop();
             Console.WriteLine($"[{DateTime.UtcNow:yyyy-MM-dd HH:mm:ss.fff}] [ProductsController] UpdateProduct(id={id}): загрузка/обработка контента = {contentStopwatch.ElapsedMilliseconds} мс, сохранение в БД = {dbStopwatch.ElapsedMilliseconds} мс, всего в действии = {totalStopwatch.ElapsedMilliseconds} мс ({totalStopwatch.Elapsed.TotalSeconds:F2} с)");
-
-            // Предзагрузка фото в кэш Telegram — в фоне, в отдельном scope
-            if (product.Images != null && product.Images.Count > 0)
-            {
-                var baseUrl = $"{Request.Scheme}://{Request.Host}";
-                var productId = product.Id;
-                var scopeFactory = _scopeFactory;
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        using var scope = scopeFactory.CreateScope();
-                        var telegramService = scope.ServiceProvider.GetRequiredService<ITelegramNotificationService>();
-                        await telegramService.PreCacheProductImagesAsync(productId, baseUrl);
-                    }
-                    catch (Exception ex) { Console.WriteLine($"[PreCache] Error: {ex.Message}"); }
-                });
-            }
 
             return Ok(product);
         }

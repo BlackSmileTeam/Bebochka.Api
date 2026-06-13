@@ -51,16 +51,6 @@ public class OrderItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// Telegram chat ID of the user's "беру" comment (to delete when item is removed from order).
-    /// </summary>
-    public long? TelegramCommentChatId { get; set; }
-
-    /// <summary>
-    /// Telegram message ID of the user's "беру" comment.
-    /// </summary>
-    public int? TelegramCommentMessageId { get; set; }
-
-    /// <summary>
     /// Whether the item has been added to the parcel (for packing checklist).
     /// </summary>
     public bool AddedToParcel { get; set; }

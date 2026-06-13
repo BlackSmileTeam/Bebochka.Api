@@ -8,7 +8,7 @@ public class OrderDto
     public int Id { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
     public string CustomerName { get; set; } = string.Empty;
-    /// <summary>Link to customer profile or chat (tg://openmessage?user_id=... or https://t.me/username).</summary>
+    /// <summary>Link to customer profile (e.g. VK).</summary>
     public string? CustomerProfileLink { get; set; }
     public string CustomerPhone { get; set; } = string.Empty;
     public string? CustomerEmail { get; set; }
@@ -30,8 +30,6 @@ public class OrderDto
     public DateTime? CancelledAt { get; set; }
     public string? CancellationReason { get; set; }
     public int? UserId { get; set; }
-    public long? TelegramUserId { get; set; }
-    public string? TelegramUsername { get; set; }
 
     /// <summary>История смены статусов (хронологически).</summary>
     public List<OrderStatusHistoryDto> StatusHistory { get; set; } = new();
@@ -170,35 +168,6 @@ public class CreateOrderItemDto
     public int Quantity { get; set; }
 }
 
-/// <summary>
-/// Request for reserving a product from a Telegram channel post comment.
-/// </summary>
-public class ReserveFromTelegramRequestDto
-{
-    public string ChannelId { get; set; } = string.Empty;
-    public int MessageId { get; set; }
-    public long TelegramUserId { get; set; }
-    public string? Username { get; set; }
-    public string? FirstName { get; set; }
-    public string? LastName { get; set; }
-    /// <summary>Телефон, если пользователь поделился контактом в Telegram.</summary>
-    public string? CustomerPhone { get; set; }
-    /// <summary>Chat ID сообщения с фразой «беру» (для удаления при снятии товара с заказа).</summary>
-    public long? CommentChatId { get; set; }
-    /// <summary>Message ID сообщения с фразой «беру».</summary>
-    public int? CommentMessageId { get; set; }
-}
-
-/// <summary>
-/// Result of reserve-from-telegram.
-/// </summary>
-public class ReserveFromTelegramResultDto
-{
-    public bool Success { get; set; }
-    public OrderDto? Order { get; set; }
-    public string? Reason { get; set; }
-}
-
-/// <summary>Результат смены статуса заказа (админка / публичный endpoint для бота).</summary>
+/// <summary>Результат смены статуса заказа (админка).</summary>
 public sealed record OrderStatusUpdateOutcome(bool Success, string? Message = null, bool RequiresSplitConfirmation = false);
 

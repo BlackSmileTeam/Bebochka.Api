@@ -220,28 +220,18 @@ builder.Services.AddAuthorization();
         builder.Services.AddScoped<IReferralService, ReferralService>();
         builder.Services.AddScoped<LookupItemsService>();
         builder.Services.AddScoped<IEmailService, EmailService>();
-        builder.Services.AddScoped<ITelegramNotificationService, TelegramNotificationService>();
-        builder.Services.AddScoped<CollageService>();
         builder.Services.AddSingleton<BackupJobStore>();
         builder.Services.AddScoped<BackupService>();
         
-        // Add HttpClient for Telegram Bot API
-        builder.Services.AddHttpClient<ITelegramNotificationService, TelegramNotificationService>(client =>
-        {
-            client.Timeout = TimeSpan.FromSeconds(500); // Increased timeout for sending large images (500 seconds)
-        });
-
         builder.Services.AddHttpClient();
         
-        // Фоновые задачи (Telegram, корзины) — только на основном API (FirstVDS), не на edge-копии.
+        // Фоновые задачи (корзины) — только на основном API (FirstVDS), не на edge-копии.
         var runBackgroundJobs = !string.Equals(
             builder.Configuration["App:RunBackgroundJobs"],
             "false",
             StringComparison.OrdinalIgnoreCase);
         if (runBackgroundJobs)
         {
-            builder.Services.AddHostedService<ProductPublicationService>();
-            builder.Services.AddHostedService<AnnouncementService>();
             builder.Services.AddHostedService<CartRetentionService>();
         }
 

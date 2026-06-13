@@ -26,7 +26,7 @@ public class Order
     public string CustomerName { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the link to customer profile or chat (e.g. tg://openmessage?user_id=... or https://t.me/username)
+    /// Gets or sets the link to customer profile (e.g. VK).
     /// </summary>
     public string? CustomerProfileLink { get; set; }
     

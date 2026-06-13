@@ -47,20 +47,10 @@ public class AppDbContext : DbContext
     public DbSet<OrderCustomerReview> OrderCustomerReviews { get; set; }
     
     /// <summary>
-    /// Gets or sets the Announcements database set
-    /// </summary>
-    public DbSet<Announcement> Announcements { get; set; }
-    
-    /// <summary>
     /// Gets or sets the Brands database set
     /// </summary>
     public DbSet<Brand> Brands { get; set; }
     public DbSet<ProductNameSuggestion> ProductNameSuggestions { get; set; }
-
-    /// <summary>
-    /// Gets or sets the TelegramErrors database set
-    /// </summary>
-    public DbSet<TelegramError> TelegramErrors { get; set; }
 
     /// <summary>
     /// Gets or sets the ReserveQueue database set (очередь «беру» при уже забронированном товаре)
@@ -109,19 +99,14 @@ public class AppDbContext : DbContext
             entity.Property(e => e.Price).HasColumnType("decimal(10,2)");
             entity.Property(e => e.ImagesJson).HasColumnName("Images");
             entity.Ignore(e => e.Images);
-            entity.Property(e => e.TelegramFileIdsJson).HasColumnName("TelegramFileIds");
-            entity.Ignore(e => e.TelegramFileIds);
             entity.Property(e => e.PublishedAt);
             entity.Property(e => e.CartAvailableAt);
-            entity.Property(e => e.TelegramMessageId);
-            entity.Property(e => e.TelegramChatId).HasMaxLength(50);
             entity.Property(e => e.BoxNumber).HasMaxLength(50);
             entity.Property(e => e.Owner).HasMaxLength(50);
             entity.Property(e => e.IncomingShipmentId);
             entity.Property(e => e.Nuance).HasMaxLength(100);
             entity.Property(e => e.DiscountPercent);
             entity.HasIndex(e => e.PublishedAt);
-            entity.HasIndex(e => new { e.TelegramChatId, e.TelegramMessageId });
             entity.HasIndex(e => e.IncomingShipmentId);
             entity.HasOne(e => e.IncomingShipment)
                 .WithMany()
@@ -152,7 +137,6 @@ public class AppDbContext : DbContext
             entity.Property(e => e.PasswordHash).IsRequired().HasMaxLength(255);
             entity.Property(e => e.Email).HasMaxLength(100);
             entity.Property(e => e.FullName).HasMaxLength(100);
-            entity.Property(e => e.TelegramUserId);
             entity.Property(e => e.Phone).HasMaxLength(20);
             entity.Property(e => e.GoogleSub).HasMaxLength(64);
             entity.Property(e => e.VkUserId);
@@ -160,7 +144,6 @@ public class AppDbContext : DbContext
             entity.Property(e => e.AutoFilterByChildren).HasDefaultValue(false);
             entity.Property(e => e.DateOfBirth).HasColumnType("date");
             entity.HasIndex(e => e.Username).IsUnique();
-            entity.HasIndex(e => e.TelegramUserId).IsUnique().HasFilter("[TelegramUserId] IS NOT NULL");
             entity.HasIndex(e => e.Phone).IsUnique().HasFilter("[Phone] IS NOT NULL");
             entity.HasIndex(e => e.GoogleSub).IsUnique().HasFilter("[GoogleSub] IS NOT NULL");
             entity.HasIndex(e => e.VkUserId).IsUnique().HasFilter("[VkUserId] IS NOT NULL");
@@ -225,8 +208,6 @@ public class AppDbContext : DbContext
             entity.Property(e => e.ProductName).IsRequired().HasMaxLength(255);
             entity.Property(e => e.ProductPrice).HasColumnType("decimal(10,2)");
             entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            entity.Property(e => e.TelegramCommentChatId);
-            entity.Property(e => e.TelegramCommentMessageId);
             entity.Property(e => e.AddedToParcel).HasDefaultValue(false);
             entity.HasOne(e => e.Order)
                 .WithMany(o => o.OrderItems)
@@ -306,18 +287,6 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => e.PhoneE164);
         });
 
-        modelBuilder.Entity<Announcement>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Message).IsRequired().HasMaxLength(2000);
-            entity.Property(e => e.ProductIdsJson).HasColumnName("ProductIds");
-            entity.Ignore(e => e.ProductIds);
-            entity.Property(e => e.CollageImagesJson).HasColumnName("CollageImages");
-            entity.Ignore(e => e.CollageImages);
-            entity.HasIndex(e => e.ScheduledAt);
-            entity.HasIndex(e => e.IsSent);
-        });
-
         modelBuilder.Entity<Brand>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -330,19 +299,6 @@ public class AppDbContext : DbContext
             entity.HasKey(e => e.Id);
             entity.Property(e => e.Name).IsRequired().HasMaxLength(150);
             entity.HasIndex(e => e.Name).IsUnique();
-        });
-
-        modelBuilder.Entity<TelegramError>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.Message).IsRequired().HasMaxLength(2000);
-            entity.Property(e => e.Details).HasColumnType("TEXT"); // Use TEXT for larger error details
-            entity.Property(e => e.ErrorType).IsRequired().HasMaxLength(100);
-            entity.Property(e => e.ProductInfo).HasMaxLength(1000);
-            entity.Property(e => e.ChannelId).HasMaxLength(100);
-            entity.Property(e => e.ErrorDate).IsRequired();
-            entity.HasIndex(e => e.ErrorDate);
-            entity.HasIndex(e => e.ErrorType);
         });
 
         modelBuilder.Entity<PersonalDataConsentLog>(entity =>

@@ -65,12 +65,7 @@ public interface IOrderService
     Task<bool> DeleteOrderAsync(int orderId);
 
     /// <summary>
-    /// Reserves a product from a Telegram channel post (first allowed comment).
-    /// </summary>
-    Task<ReserveFromTelegramResultDto> ReserveFromTelegramAsync(string channelId, int messageId, long telegramUserId, string? username, string? firstName, string? lastName, string? customerPhone = null, long? commentChatId = null, int? commentMessageId = null);
-
-    /// <summary>
-    /// Removes an item from an order: deletes user's Telegram comment, restores stock, optionally assigns product to next user from reserve queue.
+    /// Removes an item from an order, restores stock, optionally assigns product to next user from web reserve queue.
     /// </summary>
     Task<bool> DeleteOrderItemAsync(int orderId, int itemId);
 

@@ -379,34 +379,7 @@ public class OrdersController : ControllerBase
     }
 
     /// <summary>
-    /// Reserves a product from a Telegram channel post (first allowed comment).
-    /// </summary>
-    [HttpPost("reserve-from-telegram")]
-    [ProducesResponseType(typeof(ReserveFromTelegramResultDto), StatusCodes.Status200OK)]
-    public async Task<ActionResult<ReserveFromTelegramResultDto>> ReserveFromTelegram([FromBody] ReserveFromTelegramRequestDto dto)
-    {
-        if (string.IsNullOrWhiteSpace(dto.ChannelId))
-            return BadRequest(new ReserveFromTelegramResultDto { Success = false, Reason = "ChannelId required" });
-        if (dto.MessageId <= 0)
-            return BadRequest(new ReserveFromTelegramResultDto { Success = false, Reason = "MessageId required" });
-        if (dto.TelegramUserId <= 0)
-            return BadRequest(new ReserveFromTelegramResultDto { Success = false, Reason = "TelegramUserId required" });
-
-        var result = await _orderService.ReserveFromTelegramAsync(
-            dto.ChannelId,
-            dto.MessageId,
-            dto.TelegramUserId,
-            dto.Username,
-            dto.FirstName,
-            dto.LastName,
-            dto.CustomerPhone,
-            dto.CommentChatId,
-            dto.CommentMessageId);
-        return Ok(result);
-    }
-
-    /// <summary>
-    /// Removes an item from an order. Deletes user's Telegram comment, restores stock, optionally assigns product to next user from reserve queue.
+    /// Removes an item from an order. Restores stock, optionally assigns product to next user from web reserve queue.
     /// </summary>
     [HttpDelete("{orderId}/items/{itemId}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]

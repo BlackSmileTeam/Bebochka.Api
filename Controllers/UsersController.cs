@@ -97,36 +97,6 @@ public class UsersController : ControllerBase
     }
 
     /// <summary>
-    /// Checks if a user is admin by Telegram User ID
-    /// </summary>
-    /// <param name="telegramUserId">Telegram User ID</param>
-    /// <returns>True if user is admin, false otherwise</returns>
-    /// <response code="200">Returns admin status</response>
-    /// <response code="404">User not found</response>
-    [HttpGet("isadmin/{telegramUserId}")]
-    [AllowAnonymous]
-    [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<bool>> IsAdmin(long telegramUserId)
-    {
-        try
-        {
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.TelegramUserId == telegramUserId);
-
-            // Если пользователь не найден, возвращаем false (не админ)
-            if (user == null)
-                return Ok(false);
-
-            return Ok(user.IsAdmin);
-        }
-        catch
-        {
-            return Ok(false);
-        }
-    }
-
-    /// <summary>
     /// Gets a user by ID
     /// </summary>
     /// <param name="id">User ID</param>
@@ -207,40 +177,6 @@ public class UsersController : ControllerBase
     };
 
     /// <summary>
-    /// Links a Telegram User ID to an existing user
-    /// </summary>
-    /// <param name="id">User ID</param>
-    /// <param name="telegramUserId">Telegram User ID</param>
-    /// <returns>Success response</returns>
-    /// <response code="200">Telegram User ID linked successfully</response>
-    /// <response code="400">Telegram User ID already linked to another user</response>
-    /// <response code="404">User not found</response>
-    [HttpPut("{id}/telegram")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult> LinkTelegramUserId(int id, [FromBody] LinkTelegramUserIdDto dto)
-    {
-        var user = await _context.Users.FindAsync(id);
-        if (user == null)
-            return NotFound(new { message = "User not found" });
-
-        // Проверяем, не привязан ли уже этот Telegram User ID к другому пользователю
-        var existingUser = await _context.Users
-            .FirstOrDefaultAsync(u => u.TelegramUserId == dto.TelegramUserId && u.Id != id);
-
-        if (existingUser != null)
-        {
-            return BadRequest(new { message = $"Telegram User ID {dto.TelegramUserId} is already linked to user {existingUser.Username}" });
-        }
-
-        user.TelegramUserId = dto.TelegramUserId;
-        await _context.SaveChangesAsync();
-
-        return Ok(new { message = $"Telegram User ID {dto.TelegramUserId} linked to user {user.Username} successfully" });
-    }
-
-    /// <summary>
     /// Changes a user's password
     /// </summary>
     /// <param name="id">User ID</param>
@@ -263,45 +199,6 @@ public class UsersController : ControllerBase
         await _context.SaveChangesAsync();
 
         return Ok(new { message = "Password changed successfully" });
-    }
-
-    /// <summary>
-    /// Gets current authenticated user's preferred channel emoji (Telegram custom_emoji_id)
-    /// </summary>
-    [HttpGet("me/channel-emoji")]
-    public async Task<ActionResult<object>> GetMyChannelEmoji()
-    {
-        var userIdClaim = User.FindFirst("UserId")?.Value
-                          ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
-            return Unauthorized();
-
-        var user = await _context.Users.FindAsync(userId);
-        if (user == null)
-            return Unauthorized();
-
-        return Ok(new { emojiId = user.ChannelCustomEmojiId });
-    }
-
-    /// <summary>
-    /// Updates current authenticated user's preferred channel emoji (Telegram custom_emoji_id)
-    /// </summary>
-    [HttpPost("me/channel-emoji")]
-    public async Task<ActionResult> SetMyChannelEmoji([FromBody] UpdateChannelEmojiDto dto)
-    {
-        var userIdClaim = User.FindFirst("UserId")?.Value
-                          ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrEmpty(userIdClaim) || !int.TryParse(userIdClaim, out var userId))
-            return Unauthorized();
-
-        var user = await _context.Users.FindAsync(userId);
-        if (user == null)
-            return Unauthorized();
-
-        user.ChannelCustomEmojiId = string.IsNullOrWhiteSpace(dto.EmojiId) ? null : dto.EmojiId.Trim();
-        await _context.SaveChangesAsync();
-
-        return Ok(new { emojiId = user.ChannelCustomEmojiId });
     }
 
     /// <summary>

@@ -98,7 +98,8 @@ public class ProductService : IProductService
         string? gender,
         string? condition,
         string? sort,
-        bool includeFacets)
+        bool includeFacets,
+        bool publicOnly = false)
     {
         page = Math.Max(1, page);
         pageSize = Math.Clamp(pageSize, 1, 48);
@@ -109,7 +110,7 @@ public class ProductService : IProductService
             .Where(p => p.QuantityInStock > 0
                 && (p.PublishedAt == null || p.PublishedAt <= moscowNow)
                 && (!p.KitId.HasValue || p.IsKitDisplay)
-                && (!p.IsTestProduct || isAdmin))
+                && (!p.IsTestProduct || (!publicOnly && isAdmin)))
             .OrderByDescending(p => p.CreatedAt)
             .ToListAsync();
 
@@ -680,7 +681,7 @@ public class ProductService : IProductService
     }
     
     /// <summary>
-    /// Gets all unpublished products (for announcement selection)
+    /// Gets all unpublished products (admin).
     /// PublishedAt is stored as Moscow time, so we compare with current Moscow time
     /// </summary>
     /// <returns>List of unpublished products</returns>
