@@ -368,7 +368,8 @@ public class OrderService : IOrderService
             return new OrderStatusUpdateOutcome(false, "Статус родительского заказа меняется автоматически после отправки всех частей.");
 
         if (status == "Отправлен"
-            && string.Equals(previousStatus, "В сборке", StringComparison.Ordinal)
+            && (string.Equals(previousStatus, "В сборке", StringComparison.Ordinal)
+                || string.Equals(previousStatus, "На доставку", StringComparison.Ordinal))
             && order.ParentOrderId == null
             && !await _context.Orders.AnyAsync(o => o.ParentOrderId == orderId))
         {
