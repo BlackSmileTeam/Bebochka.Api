@@ -1,3 +1,7 @@
+# Production на Selectel (139.100.225.234)
+# DNS: bebochka.ru, www.bebochka.ru, bebochka.online, www.bebochka.online → Selectel
+# FirstVDS (157.22.199.24) больше не используется — деплой только через EDGE_* secrets.
+
 name: .NET API Deployment Pipeline
 
 on:
@@ -22,6 +26,7 @@ env:
 
 jobs:
   preflight:
+    if: ${{ secrets.EDGE_PROD_HOST == '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Validate required secrets
@@ -49,7 +54,7 @@ jobs:
           key: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           command_timeout: 2m
           script: |
-            echo "=== SSH preflight FirstVDS ==="
+            echo "=== SSH preflight (legacy host) ==="
             echo "Docker: $(docker --version 2>/dev/null || echo not installed)"
             echo "Disk: $(df -h / | tail -1)"
             docker ps -a --format 'table {{.Names}}\t{{.Status}}' | head -20
@@ -69,7 +74,7 @@ jobs:
             exit 0
           fi
           if [ -z "${{ secrets.EDGE_DB_CONNECTION_STRING }}" ]; then
-            echo "Missing EDGE_DB_CONNECTION_STRING (MySQL on FirstVDS for Selectel API)"
+            echo "Missing EDGE_DB_CONNECTION_STRING (MySQL на Selectel, обычно host.docker.internal)"
             missing=1
           fi
           [ -z "${{ secrets.JWT_KEY }}" ] && echo "Missing JWT_KEY" && missing=1 || true
@@ -93,7 +98,8 @@ jobs:
             echo "=== OK ==="
 
   build:
-    needs: preflight
+    needs: [preflight, preflight-edge]
+    if: always() && !cancelled() && (needs.preflight.result == 'success' || needs.preflight.result == 'skipped') && needs.preflight-edge.result == 'success'
     runs-on: ubuntu-latest
     outputs:
       docker_tag: ${{ steps.meta.outputs.TAG }}
@@ -172,6 +178,7 @@ jobs:
 
   deploy:
     needs: [build]
+    if: ${{ secrets.EDGE_PROD_HOST == '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Download image
@@ -263,6 +270,7 @@ jobs:
 
   post-deploy-test:
     needs: [deploy, preflight]
+    if: ${{ secrets.EDGE_PROD_HOST == '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployment
@@ -287,7 +295,7 @@ jobs:
 
       - name: Summary
         run: |
-          echo "## Post-deploy FirstVDS" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Post-deploy (legacy host)" >> "$GITHUB_STEP_SUMMARY"
           echo "- Проверка: см. лог шага **Verify deployment**." >> "$GITHUB_STEP_SUMMARY"
 
   deploy-edge:
@@ -343,7 +351,7 @@ jobs:
             Jwt__Key=${{ secrets.JWT_KEY }}
             Jwt__Issuer=BebochkaApi
             Jwt__Audience=BebochkaClient
-            App__RunBackgroundJobs=false
+            App__RunBackgroundJobs=true
             Vk__AppId=${{ secrets.VK_APP_ID }}
             Vk__SecureKey=${{ secrets.VK_SECURE_KEY }}
             EOF
@@ -364,7 +372,7 @@ jobs:
               -e Jwt__Key='${{ secrets.JWT_KEY }}' \
               -e Jwt__Issuer=BebochkaApi \
               -e Jwt__Audience=BebochkaClient \
-              -e App__RunBackgroundJobs=false \
+              -e App__RunBackgroundJobs=true \
               -e Vk__AppId='${{ secrets.VK_APP_ID }}' \
               -e Vk__SecureKey='${{ secrets.VK_SECURE_KEY }}' \
               $IMAGE_NAME:latest
@@ -373,7 +381,7 @@ jobs:
             docker logs --tail=30 $IMAGE_NAME
             CODE=$(curl -sS -o /tmp/api_body.txt -w "%{http_code}" --max-time 45 "http://127.0.0.1:${HOST_PORT}/api/health" || echo "000")
             echo "GET /api/health HTTP $CODE"
-            if [ "$CODE" = "200" ]; then head -c 200 /tmp/api_body.txt && echo; else echo "WARN: проверьте EDGE_DB_CONNECTION_STRING и firewall MySQL на FirstVDS"; fi
+            if [ "$CODE" = "200" ]; then head -c 200 /tmp/api_body.txt && echo; else echo "WARN: проверьте EDGE_DB_CONNECTION_STRING и MySQL на Selectel"; fi
             docker image prune -f
             echo "=== Selectel API deploy done (:${HOST_PORT}) ==="
 
@@ -382,5 +390,5 @@ jobs:
           echo "## Selectel API deploy" >> "$GITHUB_STEP_SUMMARY"
           echo "- Host: \`${{ secrets.EDGE_PROD_HOST }}\`" >> "$GITHUB_STEP_SUMMARY"
           echo "- Port: **${{ env.HOST_PORT }}**" >> "$GITHUB_STEP_SUMMARY"
-          echo "- DB: FirstVDS (EDGE_DB_CONNECTION_STRING)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Background jobs: **off** (edge API)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- DB: MySQL на Selectel (EDGE_DB_CONNECTION_STRING)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Background jobs: **on** (корзины, авто-отмена)" >> "$GITHUB_STEP_SUMMARY"
