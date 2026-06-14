@@ -11,16 +11,21 @@ namespace Bebochka.Api.Controllers;
 [Route("api/seo")]
 public class SeoController : ControllerBase
 {
-    private static readonly string[] SiteUrls =
-    {
-        "https://bebochka.ru",
-        "https://www.bebochka.online"
-    };
     private readonly AppDbContext _db;
 
     public SeoController(AppDbContext db)
     {
         _db = db;
+    }
+
+    private string GetPublicSiteUrl()
+    {
+        var host = Request.Host.Host.ToLowerInvariant();
+        if (host.Contains("bebochka.online"))
+            return "https://www.bebochka.online";
+        if (host.Contains("bebochka.ru"))
+            return "https://bebochka.ru";
+        return "https://www.bebochka.online";
     }
 
     /// <summary>Sitemap только для товаров в наличии (не проданных).</summary>
@@ -37,6 +42,7 @@ public class SeoController : ControllerBase
 
         XNamespace ns = "http://www.sitemaps.org/schemas/sitemap/0.9";
         var urlset = new XElement(ns + "urlset");
+        var siteUrl = GetPublicSiteUrl();
 
         foreach (var p in products)
         {
@@ -44,15 +50,12 @@ public class SeoController : ControllerBase
             var path = string.IsNullOrEmpty(slug) ? $"product/{p.Id}" : $"product/{p.Id}-{slug}";
             var lastmod = p.UpdatedAt.ToString("yyyy-MM-dd");
 
-            foreach (var siteUrl in SiteUrls)
-            {
-                urlset.Add(
-                    new XElement(ns + "url",
-                        new XElement(ns + "loc", $"{siteUrl}/{path}"),
-                        new XElement(ns + "lastmod", lastmod),
-                        new XElement(ns + "changefreq", "weekly"),
-                        new XElement(ns + "priority", "0.7")));
-            }
+            urlset.Add(
+                new XElement(ns + "url",
+                    new XElement(ns + "loc", $"{siteUrl}/{path}"),
+                    new XElement(ns + "lastmod", lastmod),
+                    new XElement(ns + "changefreq", "weekly"),
+                    new XElement(ns + "priority", "0.7")));
         }
 
         var doc = new XDocument(new XDeclaration("1.0", "utf-8", null), urlset);
