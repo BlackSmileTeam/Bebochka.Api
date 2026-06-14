@@ -141,6 +141,8 @@ public class CartController : ControllerBase
         public int ProductId { get; set; }
         public string ProductName { get; set; } = string.Empty;
         public string? ProductBrand { get; set; }
+        public decimal ProductPrice { get; set; }
+        public string? ProductSize { get; set; }
         public List<string> ProductImages { get; set; } = new();
         public int Quantity { get; set; }
         public int? UserId { get; set; }
@@ -215,6 +217,8 @@ public class CartController : ControllerBase
                 ProductId = c.ProductId,
                 ProductName = c.Product?.Name ?? "—",
                 ProductBrand = c.Product?.Brand,
+                ProductPrice = c.Product?.Price ?? 0,
+                ProductSize = c.Product?.Size,
                 ProductImages = c.Product?.Images ?? new List<string>(),
                 Quantity = c.Quantity,
                 UserId = c.UserId,
