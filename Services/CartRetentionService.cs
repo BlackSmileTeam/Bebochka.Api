@@ -40,6 +40,12 @@ public class CartRetentionService : BackgroundService
 
     private async Task ProcessRetentionAsync(CancellationToken ct)
     {
+        if (!BackgroundJobSettings.ExecuteWork)
+        {
+            _logger.LogDebug("CartRetentionService tick (work disabled, timer only)");
+            return;
+        }
+
         await using var scope = _scopeFactory.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var queueService = scope.ServiceProvider.GetRequiredService<WebReserveQueueService>();

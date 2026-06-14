@@ -225,7 +225,8 @@ builder.Services.AddAuthorization();
         
         builder.Services.AddHttpClient();
         
-        // Фоновые задачи (корзины) — только на основном API (FirstVDS), не на edge-копии.
+        // Таймер фоновых задач (корзины) — только на основном API (FirstVDS), не на edge-копии.
+        // Рабочая часть отключена в BackgroundJobSettings.ExecuteWork (будет отдельный worker).
         var runBackgroundJobs = !string.Equals(
             builder.Configuration["App:RunBackgroundJobs"],
             "false",
