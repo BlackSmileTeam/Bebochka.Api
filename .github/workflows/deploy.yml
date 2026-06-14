@@ -25,8 +25,24 @@ env:
   IMAGE_NAME: bebochka-backend
 
 jobs:
+  detect-target:
+    runs-on: ubuntu-latest
+    outputs:
+      edge: ${{ steps.detect.outputs.edge }}
+    steps:
+      - id: detect
+        run: |
+          if [ -n "${{ secrets.EDGE_PROD_HOST }}" ] && [ -n "${{ secrets.EDGE_SSH_PRIVATE_KEY }}" ]; then
+            echo "edge=true" >> "$GITHUB_OUTPUT"
+            echo "Deploy target: Selectel edge"
+          else
+            echo "edge=false" >> "$GITHUB_OUTPUT"
+            echo "Deploy target: legacy FirstVDS"
+          fi
+
   preflight:
-    if: ${{ secrets.EDGE_PROD_HOST == '' }}
+    needs: detect-target
+    if: needs.detect-target.outputs.edge != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Validate required secrets
@@ -61,29 +77,22 @@ jobs:
             echo "=== Preflight OK ==="
 
   preflight-edge:
+    needs: detect-target
+    if: needs.detect-target.outputs.edge == 'true'
     runs-on: ubuntu-latest
-    outputs:
-      configured: ${{ steps.edge.outputs.configured }}
     steps:
       - id: edge
         run: |
           missing=0
-          if [ -z "${{ secrets.EDGE_PROD_HOST }}" ] || [ -z "${{ secrets.EDGE_SSH_PRIVATE_KEY }}" ]; then
-            echo "Edge SSH secrets missing — skip edge API deploy"
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           if [ -z "${{ secrets.EDGE_DB_CONNECTION_STRING }}" ]; then
             echo "Missing EDGE_DB_CONNECTION_STRING (MySQL на Selectel, обычно host.docker.internal)"
             missing=1
           fi
           [ -z "${{ secrets.JWT_KEY }}" ] && echo "Missing JWT_KEY" && missing=1 || true
           [ "$missing" -ne 0 ] && exit 1
-          echo "configured=true" >> "$GITHUB_OUTPUT"
           echo "Edge API secrets OK"
 
       - name: SSH preflight (Selectel)
-        if: steps.edge.outputs.configured == 'true'
         uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.EDGE_PROD_HOST }}
@@ -98,8 +107,8 @@ jobs:
             echo "=== OK ==="
 
   build:
-    needs: [preflight, preflight-edge]
-    if: always() && !cancelled() && (needs.preflight.result == 'success' || needs.preflight.result == 'skipped') && needs.preflight-edge.result == 'success'
+    needs: [detect-target, preflight, preflight-edge]
+    if: always() && !cancelled() && needs.detect-target.result == 'success' && (needs.preflight.result == 'success' || needs.preflight.result == 'skipped') && (needs.preflight-edge.result == 'success' || needs.preflight-edge.result == 'skipped')
     runs-on: ubuntu-latest
     outputs:
       docker_tag: ${{ steps.meta.outputs.TAG }}
@@ -177,8 +186,8 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   deploy:
-    needs: [build]
-    if: ${{ secrets.EDGE_PROD_HOST == '' }}
+    needs: [build, detect-target]
+    if: needs.detect-target.outputs.edge != 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download image
@@ -269,8 +278,8 @@ jobs:
             echo "=== Deploy finished ==="
 
   post-deploy-test:
-    needs: [deploy, preflight]
-    if: ${{ secrets.EDGE_PROD_HOST == '' }}
+    needs: [deploy, detect-target]
+    if: needs.detect-target.outputs.edge != 'true' && needs.deploy.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployment
@@ -299,8 +308,8 @@ jobs:
           echo "- Проверка: см. лог шага **Verify deployment**." >> "$GITHUB_STEP_SUMMARY"
 
   deploy-edge:
-    needs: [build, preflight-edge]
-    if: needs.preflight-edge.outputs.configured == 'true'
+    needs: [build, detect-target]
+    if: needs.detect-target.outputs.edge == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Download image
