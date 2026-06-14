@@ -203,23 +203,26 @@ public class OrderService : IOrderService
             .Select(r => r.OrderId!.Value)
             .ToListAsync()).ToHashSet();
 
-        var rootOrders = orders.Where(o => o.ParentOrderId == null).OrderByDescending(o => o.CreatedAt).ToList();
         var childrenByParent = orders
             .Where(o => o.ParentOrderId.HasValue)
             .GroupBy(o => o.ParentOrderId!.Value)
             .ToDictionary(g => g.Key, g => g.OrderBy(o => o.OrderNumber).ToList());
 
-        return rootOrders.Select(o =>
+        var allDtos = orders
+            .Select(o => MapToDto(o, users.GetValueOrDefault(o.UserId ?? 0), reviewedOrderIds.Contains(o.Id)))
+            .ToList();
+
+        foreach (var root in allDtos.Where(d => d.ParentOrderId == null))
         {
-            var dto = MapToDto(o, users.GetValueOrDefault(o.UserId ?? 0), reviewedOrderIds.Contains(o.Id));
-            if (childrenByParent.TryGetValue(o.Id, out var children))
+            if (childrenByParent.TryGetValue(root.Id, out var children))
             {
-                dto.ChildOrders = children
-                    .Select(c => MapToDto(c, users.GetValueOrDefault(c.UserId ?? 0), reviewedOrderIds.Contains(c.Id)))
+                root.ChildOrders = children
+                    .Select(c => allDtos.First(d => d.Id == c.Id))
                     .ToList();
             }
-            return dto;
-        }).ToList();
+        }
+
+        return allDtos.OrderByDescending(o => o.CreatedAt).ToList();
     }
 
     public async Task<OrderDto?> GetOrderByIdAsync(int id)
