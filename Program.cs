@@ -135,14 +135,12 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowReactApp", policy =>
     {
         policy.WithOrigins(
-                "http://localhost:5173", 
-                "http://localhost:3000",
-                "http://localhost:5000",
+                "https://bebochka.ru",
+                "https://www.bebochka.ru",
+                "https://bebochka.online",
+                "https://www.bebochka.online",
                 "http://89.104.67.36:55502",
                 "http://89.104.67.36:55501",
-                "http://127.0.0.1:5173",
-                "http://127.0.0.1:3000",
-                "http://127.0.0.1:5000",
                 "http://89.104.67.36",
                 "http://89.104.67.36:80",
                 "http://157.22.199.24",
@@ -317,6 +315,5 @@ app.MapControllers();
 
 // Configure listening URLs
 app.Urls.Add("http://0.0.0.0:44315");
-app.Urls.Add("http://localhost:5000");
 
 app.Run();

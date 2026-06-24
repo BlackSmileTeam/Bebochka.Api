@@ -60,8 +60,7 @@ public class AuthController : ControllerBase
         {
             return normalized is "bebochka.ru" or "www.bebochka.ru"
                 or "bebochka.online" or "www.bebochka.online"
-                or "xn--80abap0ax7d.xn--p1ai" or "www.xn--80abap0ax7d.xn--p1ai"
-                or "localhost" or "127.0.0.1";
+                or "xn--80abap0ax7d.xn--p1ai" or "www.xn--80abap0ax7d.xn--p1ai";
         }
 
         return configured.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -79,8 +78,7 @@ public class AuthController : ControllerBase
         var normalized = NormalizeHost(host);
         if (!string.IsNullOrWhiteSpace(normalized) && IsAllowedFrontendHost(normalized))
         {
-            if (normalized is not ("localhost" or "127.0.0.1")
-                && scheme.Equals("http", StringComparison.OrdinalIgnoreCase))
+            if (scheme.Equals("http", StringComparison.OrdinalIgnoreCase))
             {
                 scheme = "https";
             }
